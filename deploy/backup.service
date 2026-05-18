@@ -1,0 +1,14 @@
+[Unit]
+Description=Homelab Modular Backup Service
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/backup-server
+ExecStart=/opt/backup-server/venv/bin/backup-cli --config-dir /opt/backup-server/config backup --parallel
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
