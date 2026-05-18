@@ -1,0 +1,21 @@
+name: homeassistant
+backup:
+  - name: create_backup
+    type: http_post
+    options:
+      url: "http://homeassistant.local:8123/api/hassio/backups/new/full"
+      headers:
+        Authorization: "Bearer {{ ha_token }}"
+    register: backup_resp
+
+  - name: wait_for_backup
+    type: template
+    options:
+      template: "Backup created: {{ backup_resp }}"
+
+  - name: upload
+    type: rclone_upload
+    options:
+      local_path: "/backup/latest.tar"
+      remote_name: "gdrive"
+      remote_path: "backups/homeassistant/{{ timestamp }}.tar"

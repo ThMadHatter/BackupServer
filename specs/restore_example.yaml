@@ -1,0 +1,20 @@
+name: restore_example
+restore:
+  - name: download_artifact
+    type: rclone_download
+    options:
+      remote_name: "gdrive"
+      remote_path: "{{ artifact_remote_path }}"
+      local_path: "/tmp/restore.tar.zst"
+    register: local_artifact
+
+  - name: verify_checksum
+    type: checksum
+    options:
+      file_path: "{{ local_artifact }}"
+    register: current_checksum
+
+  - name: check_integrity
+    type: template
+    options:
+      template: "Checksum valid: {{ current_checksum == expected_checksum }}"

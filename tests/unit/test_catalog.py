@@ -1,26 +1,23 @@
 import pytest
 from pathlib import Path
-import json
-from src.core.catalog import BackupCatalog
+from catalog.manager import CatalogManager
 
-def test_catalog_save_load(tmp_path):
-    catalog_path = tmp_path / "catalog.json"
-    catalog = BackupCatalog(catalog_path)
+def test_catalog_manager(tmp_path):
+    db_path = tmp_path / "test.sqlite"
+    manager = CatalogManager(db_path)
 
-    entry = {"module": "test", "artifact": "path", "created_at": "2023-01-01T00:00:00"}
-    catalog.add_entry(entry)
+    manager.add_entry(
+        service="test",
+        run_id="run1",
+        timestamp="20230101",
+        artifact_path="/path/to/art",
+        checksum="abc",
+        metadata={"foo": "bar"}
+    )
 
-    assert catalog_path.exists()
+    backups = manager.get_backups("test")
+    assert len(backups) == 1
+    assert backups[0]["run_id"] == "run1"
 
-    new_catalog = BackupCatalog(catalog_path)
-    assert len(new_catalog.entries) == 1
-    assert new_catalog.entries[0]["module"] == "test"
-
-def test_catalog_get_backups(tmp_path):
-    catalog = BackupCatalog(tmp_path / "catalog.json")
-    catalog.add_entry({"module": "m1", "artifact": "a1"})
-    catalog.add_entry({"module": "m2", "artifact": "a2"})
-
-    m1_backups = catalog.get_backups_for_module("m1")
-    assert len(m1_backups) == 1
-    assert m1_backups[0]["artifact"] == "a1"
+    latest = manager.get_latest_backup("test")
+    assert latest["run_id"] == "run1"

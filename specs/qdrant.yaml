@@ -1,0 +1,50 @@
+name: qdrant
+
+backup:
+  - name: list_collections
+    type: http_get
+    options:
+      url: "{{ qdrant_url }}/collections"
+    register: collections_resp
+
+  - name: extract_names
+    type: json_query
+    options:
+      data: "{{ collections_resp }}"
+      query: "result.collections[].name"
+    register: collection_names
+
+  # In a real implementation, we'd loop over collection_names
+  # For the spec, let's assume a single collection for simplicity or handle via a more advanced primitive
+  - name: create_snapshot
+    type: http_post
+    options:
+      url: "{{ qdrant_url }}/collections/{{ item }}/snapshots"
+    register: snapshot_resp
+    # Loop support would be needed here in the engine
+
+  - name: download_snapshot
+    type: http_download
+    options:
+      url: "{{ qdrant_url }}/collections/{{ item }}/snapshots/{{ snapshot_name }}"
+      dest_path: "/tmp/{{ item }}.snapshot"
+
+  - name: archive
+    type: tar
+    options:
+      source_dir: "/tmp/snapshots"
+      dest_file: "/tmp/qdrant_backup.tar.zst"
+    register: artifact_path
+
+  - name: calculate_checksum
+    type: checksum
+    options:
+      file_path: "{{ artifact_path }}"
+    register: artifact_checksum
+
+  - name: upload
+    type: rclone_upload
+    options:
+      local_path: "{{ artifact_path }}"
+      remote_name: "gdrive"
+      remote_path: "backups/qdrant/{{ timestamp }}/qdrant.tar.zst"

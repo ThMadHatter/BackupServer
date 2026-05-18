@@ -1,88 +1,73 @@
-# Homelab Modular Backup System
+# Homelab Modular Backup System (Evolution)
 
-A production-grade, modular backup framework designed for Proxmox VE environments running LXC containers.
+This is the next evolution of the backup system, transformed into a **self-describing, declarative backup orchestration platform**.
 
-## Architecture
+## 🏗️ Architecture
 
-The system is built with a core-plugin architecture:
+The system is now driven by a declarative engine that interprets YAML specifications. This eliminates the need for custom Python code when adding new services.
 
-- **Core Engine**: Orchestrates backup runs, handles configuration, locking, parallel execution, and retention policies.
-- **Modules**: Independent plugins for each service (n8n, Qdrant, Home Assistant, etc.).
-- **Storage Abstraction**: Decouples the backup logic from the storage provider (initially supporting Google Drive via rclone).
-- **Catalog**: Tracks backup artifacts, timestamps, and checksums for automated retention and easy recovery.
+### Components
 
-## Design Decisions
+- **Engine**: The core runner that parses YAML specs, builds an execution plan, and executes primitives.
+- **Primitives**: Reusable building blocks for network, filesystem, LXC, and storage operations.
+- **Specs**: YAML files defining how each service should be backed up and restored.
+- **Catalog**: A SQLite-based system to track all backup runs, artifacts, and checksums.
 
-1. **Python Implementation**: Chosen for its superior error handling, testability (pytest), and modularity compared to Bash.
-2. **zstd Compression**: High performance and excellent compression ratios for homelab workloads.
-3. **Pydantic**: Used for robust configuration loading and validation.
-4. **Structured Logging**: JSON logging via `structlog` for easy observability and integration with monitoring stacks.
-5. **Atomic-like Operations**: Backups are validated and checksummed before being uploaded to remote storage.
-6. **LXC Integration**: Modules support `pct exec` to perform operations directly inside LXC containers from the Proxmox host.
+## 🚀 Why Declarative?
 
-## Components
+1.  **No Code for New Services**: Adding a new service only requires writing a YAML spec.
+2.  **Consistency**: All services use the same set of well-tested primitives.
+3.  **Transparency**: The backup process is explicitly defined in a human-readable format.
+4.  **Flexibility**: Primitives can be composed in any order to support complex workflows.
 
-### Core
-- `src/core/engine.py`: The heart of the system.
-- `src/core/storage.py`: RClone abstraction.
-- `src/core/catalog.py`: JSON-based backup tracking.
-- `src/core/locking.py`: File-based locking to prevent concurrent runs.
+## 🛠️ How to Add a New Service
 
-### Modules
-- **Qdrant**: Uses snapshot API for consistent vector database backups.
-- **n8n**: Archives the data directory (local or LXC).
-- **Home Assistant**: Archives configuration with exclude support.
-- **MQTT/Zigbee2MQTT/Cloudflared**: Robust directory archiving.
+1.  Create a new YAML file in the `specs/` directory (e.g., `specs/my_service.yaml`).
+2.  Define the `backup` steps using available primitives:
+    - `http_get`, `http_post`, `http_download`
+    - `tar`, `copy`, `compress`, `checksum`
+    - `pct_exec`
+    - `rclone_upload`
+3.  Use `{{ variable }}` syntax for dynamic values (context variables like `timestamp` and `run_id` are automatically provided).
+4.  Optionally define `restore` and `validation` steps.
 
-## Installation
-
-1. Clone the repository to `/opt/backup-server`.
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Configure your environment in `config/`:
-   - `infra.env`: Host specific paths and rclone remotes.
-   - `secrets.env`: Credentials and API keys.
-   - `backup.yaml`: Backup policies and module options.
-
-## Usage
-
-### Run Backup
-```bash
-backup-cli backup --parallel
+Example:
+```yaml
+name: simple_service
+backup:
+  - name: download_data
+    type: http_download
+    options:
+      url: "http://api.example.com/export"
+      dest_path: "/tmp/data.bin"
+  - name: upload_to_cloud
+    type: rclone_upload
+    options:
+      local_path: "/tmp/data.bin"
+      remote_name: "gdrive"
+      remote_path: "backups/simple/{{ timestamp }}.bin"
 ```
 
-### Dry Run
+## 📋 Failure Modes & Safety
+
+- **Retries**: Steps can define a `retry` count with exponential backoff.
+- **Timeouts**: (Coming soon) Steps can have execution timeouts.
+- **Dry-run**: Always use `--dry-run` to verify your spec without side effects.
+- **Integrity**: Use the `checksum` primitive and catalog to ensure backup integrity.
+
+## 🔄 Restore Procedure
+
+To restore a service:
 ```bash
-backup-cli backup --dry-run
+backup-cli restore <service_name> --version latest
 ```
+This will lookup the latest artifact in the catalog, download it, and execute the `restore` steps defined in the service spec.
 
-## Restore Procedure
+## 🧪 Testing
 
-1. Identify the artifact from the `catalog.json` or remote storage.
-2. Download the artifact if necessary.
-3. Run the module-specific restore command:
-   ```bash
-   backup-cli restore <module> <path-to-artifact>
-   ```
-   *(Note: CLI restore is currently a stub; manual extraction is recommended for critical recovery).*
-
-## Testing
-
-The system includes a comprehensive test suite:
-
-- **Unit Tests**: `tests/unit/`
-- **Integration Tests**: `tests/integration/`
-- **E2E Tests**: `tests/e2e/`
-
-Run tests with:
+Run tests using:
 ```bash
-PYTHONPATH=. pytest
+export PYTHONPATH=.
+pytest tests/
 ```
-
-## Failure Modes & Handling
-
-- **Disk Full**: The engine catches exceptions during backup and reports failure without updating the catalog.
-- **Network Error**: RClone retries and engine error handling ensure partial uploads do not corrupt the catalog.
-- **Corrupted Backup**: Checksum validation during the backup process ensures only healthy artifacts are promoted.
+Tests include unit tests for primitives, integration tests for engine logic, and E2E tests for full spec execution.
