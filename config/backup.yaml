@@ -1,0 +1,23 @@
+global_retention_days: 30
+modules:
+  qdrant:
+    enabled: true
+    schedule: "0 3 * * *"
+    retention_days: 14
+    options:
+      host: "192.168.1.20"
+      port: 6333
+  n8n:
+    enabled: true
+    schedule: "0 4 * * *"
+    retention_days: 30
+    options:
+      data_dir: "/var/lib/n8n"
+  home_assistant:
+    enabled: false
+  mqtt:
+    enabled: false
+  zigbee2mqtt:
+    enabled: false
+  cloudflared:
+    enabled: false

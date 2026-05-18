@@ -1,0 +1,30 @@
+[project]
+name = "backup-server"
+version = "0.1.0"
+description = "Production-grade modular backup system for Proxmox homelab"
+authors = [
+    { name = "Gemini CLI", email = "gemini@example.com" }
+]
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "structlog>=23.0",
+    "click>=8.0",
+    "python-dotenv>=1.0",
+    "zstandard>=0.21.0",
+    "sh>=2.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+backup-cli = "src.main:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.black]
+line-length = 88
+
+[tool.isort]
+profile = "black"
