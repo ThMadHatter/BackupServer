@@ -2,9 +2,18 @@ import sh
 import hashlib
 from pathlib import Path
 from typing import Any, Dict
-from primitives.base import Primitive
+from primitives.base import Primitive, PrimitiveContract
 
 class Tar(Primitive):
+    contract = PrimitiveContract(
+        inputs=["source_dir", "dest_file", "compression"],
+        outputs=["dest_file"],
+        side_effects=["creates_tar_archive"],
+        failure_modes=["filesystem_full", "permission_denied"],
+        retryable=False,
+        idempotent=True
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         source_dir = self.options.get("source_dir")
         dest_file = self.options.get("dest_file")
@@ -23,6 +32,15 @@ class Tar(Primitive):
         return dest_file
 
 class Copy(Primitive):
+    contract = PrimitiveContract(
+        inputs=["source", "dest"],
+        outputs=["dest"],
+        side_effects=["copies_files"],
+        failure_modes=["filesystem_full", "permission_denied"],
+        retryable=True,
+        idempotent=True
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         source = self.options.get("source")
         dest = self.options.get("dest")
@@ -32,6 +50,15 @@ class Copy(Primitive):
         return dest
 
 class Compress(Primitive):
+    contract = PrimitiveContract(
+        inputs=["source", "algorithm"],
+        outputs=["compressed_file"],
+        side_effects=["creates_compressed_file"],
+        failure_modes=["filesystem_full", "unsupported_algorithm"],
+        retryable=True,
+        idempotent=True
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         source = self.options.get("source")
         algorithm = self.options.get("algorithm", "zstd")
@@ -44,6 +71,15 @@ class Compress(Primitive):
             raise ValueError(f"Unsupported compression algorithm: {algorithm}")
 
 class Checksum(Primitive):
+    contract = PrimitiveContract(
+        inputs=["file_path", "algorithm"],
+        outputs=["checksum"],
+        side_effects=[],
+        failure_modes=["file_not_found"],
+        retryable=True,
+        idempotent=True
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         file_path = self.options.get("file_path")
         algorithm = self.options.get("algorithm", "sha256")

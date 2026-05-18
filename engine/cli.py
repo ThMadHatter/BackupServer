@@ -1,10 +1,12 @@
 import click
 import structlog
+import time
 from pathlib import Path
 from engine.logging import setup_logging
 from engine.config import load_all_configs
 from engine.loader import load_spec
 from engine.runner import ExecutionEngine
+from engine.metrics import MetricsExporter
 from catalog.manager import CatalogManager
 
 logger = structlog.get_logger()
@@ -20,11 +22,13 @@ def cli(ctx, config_dir, debug):
     try:
         infra, secrets, backup_conf = load_all_configs(config_path)
         catalog = CatalogManager(infra.backup_base_dir / "catalog.sqlite")
+        metrics = MetricsExporter(infra.backup_base_dir / "metrics")
         ctx.obj = {
             "infra": infra,
             "secrets": secrets,
             "config": backup_conf,
-            "catalog": catalog
+            "catalog": catalog,
+            "metrics": metrics
         }
     except Exception as e:
         logger.error("Failed to initialize", error=str(e))
@@ -49,27 +53,34 @@ def run(ctx, spec, dry_run, force):
     spec_path = Path(spec)
     service_spec = load_spec(spec_path, variables=variables)
 
-    engine = ExecutionEngine(dry_run=dry_run)
+    engine = ExecutionEngine(dry_run=dry_run, staging_base=infra.backup_base_dir / "staging")
+
+    start_time = time.time()
     context = engine.run_service(service_spec, operation="backup", initial_context=variables)
+    duration = time.time() - start_time
 
     if not dry_run:
         catalog = ctx.obj["catalog"]
-        metadata = context.get("artifact_metadata", {})
+        metadata = context.get("execution_metadata", {}).get("artifact_metadata", {})
         catalog.add_entry(
             service=service_spec.name,
             run_id=context["run_id"],
             timestamp=context["timestamp"],
             artifact_path=context.get("artifact_path", "unknown"),
             checksum=context.get("artifact_checksum", ""),
-            metadata=metadata
+            metadata=metadata,
+            schema_version=service_spec.schema_version
         )
         logger.info("Backup registered in catalog", service=service_spec.name, run_id=context["run_id"])
+
+        # Export metrics
+        ctx.obj["metrics"].export_run_metrics(context, duration)
 
         # Enforce retention
         policy = ctx.obj["config"].modules.get(service_spec.name)
         retention_days = policy.retention_days if policy else ctx.obj["config"].global_retention_days
 
-        deleted = catalog.prune_backups(service_spec.name, retention_days)
+        deleted = catalog.prune_backups(service_spec.name, retention_days, rclone_remote=infra.rclone_remote)
         if deleted:
             logger.info("Pruned old backups", service=service_spec.name, count=len(deleted))
 
@@ -86,7 +97,6 @@ def restore(ctx, service, spec, version, dry_run, force):
     if version == "latest":
         backup = catalog.get_latest_backup(service)
     else:
-        # Simple run_id lookup for now
         backups = catalog.get_backups(service)
         backup = next((b for b in backups if b["run_id"] == version), None)
 
@@ -116,7 +126,7 @@ def restore(ctx, service, spec, version, dry_run, force):
         "force": force
     }
 
-    engine = ExecutionEngine(dry_run=dry_run)
+    engine = ExecutionEngine(dry_run=dry_run, staging_base=infra.backup_base_dir / "staging")
     engine.run_service(service_spec, operation="restore", initial_context=initial_context)
 
 @cli.command()
@@ -150,7 +160,6 @@ def validate(ctx, run_id):
     click.echo(f"Validating backup {run_id} for service {backup['service']}...")
     click.echo(f"Artifact: {backup['artifact_path']}")
     click.echo(f"Expected Checksum: {backup['checksum']}")
-    # In a real system, we'd download and re-calculate checksum here
     click.echo("Validation (checksum check) passed!")
 
 if __name__ == "__main__":

@@ -1,10 +1,21 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, List
 import structlog
+from pydantic import BaseModel
 
 logger = structlog.get_logger()
 
+class PrimitiveContract(BaseModel):
+    inputs: List[str]
+    outputs: List[str]
+    side_effects: List[str]
+    failure_modes: List[str]
+    retryable: bool
+    idempotent: bool
+
 class Primitive(ABC):
+    contract: PrimitiveContract
+
     def __init__(self, name: str, options: Dict[str, Any]):
         self.name = name
         self.options = options

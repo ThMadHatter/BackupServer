@@ -1,73 +1,69 @@
 # Homelab Modular Backup System (Evolution)
 
-This is the next evolution of the backup system, transformed into a **self-describing, declarative backup orchestration platform**.
+This is a **self-describing, declarative backup orchestration platform** for Proxmox/LXC environments.
 
 ## 🏗️ Architecture
 
-The system is now driven by a declarative engine that interprets YAML specifications. This eliminates the need for custom Python code when adding new services.
+The system uses a declarative engine that interprets YAML specifications and executes them as a Directed Acyclic Graph (DAG).
 
-### Components
+### Core Components
 
-- **Engine**: The core runner that parses YAML specs, builds an execution plan, and executes primitives.
-- **Primitives**: Reusable building blocks for network, filesystem, LXC, and storage operations.
-- **Specs**: YAML files defining how each service should be backed up and restored.
-- **Catalog**: A SQLite-based system to track all backup runs, artifacts, and checksums.
+- **Engine**: The core runner that parses YAML specs, builds an execution DAG, and manages the execution lifecycle.
+- **DAG Executor**: Formally validates dependencies, detects cycles, and ensures correct execution ordering.
+- **Staging Area**: Isolated, deterministic directories for each run.
+- **Primitives**: Reusable building blocks (Network, FS, LXC, Storage) with formal contracts.
+- **Catalog**: SQLite-based system tracking all backup runs, artifacts, and checksums with schema versioning.
 
-## 🚀 Why Declarative?
+## 🛡️ Reliability & Safety
 
-1.  **No Code for New Services**: Adding a new service only requires writing a YAML spec.
-2.  **Consistency**: All services use the same set of well-tested primitives.
-3.  **Transparency**: The backup process is explicitly defined in a human-readable format.
-4.  **Flexibility**: Primitives can be composed in any order to support complex workflows.
+### Execution DAG Model
+- **Explicit DAG**: Generated from `depends_on` fields in YAML.
+- **Validation**: Strict cycle detection and missing dependency validation.
+- **Ordering**: Deterministic topological sort based on dependencies and spec order.
 
-## 🛠️ How to Add a New Service
+### Staging Lifecycle
+- **Isolation**: Each run gets a unique `/var/lib/backup-engine/staging/<run_id>/`.
+- **Cleanup**: Successful runs are automatically cleaned up.
+- **Crash Recovery**: Failed runs preserve the staging area for forensic debugging.
 
-1.  Create a new YAML file in the `specs/` directory (e.g., `specs/my_service.yaml`).
-2.  Define the `backup` steps using available primitives:
-    - `http_get`, `http_post`, `http_download`
-    - `tar`, `copy`, `compress`, `checksum`
-    - `pct_exec`
-    - `rclone_upload`
-3.  Use `{{ variable }}` syntax for dynamic values (context variables like `timestamp` and `run_id` are automatically provided).
-4.  Optionally define `restore` and `validation` steps.
+### Restore Safety
+- **Mandatory Integrity**: Checksums are verified *before* any restore steps are executed.
+- **Overwrite Protection**: Restores will fail if target paths already exist unless `--force` is provided.
+- **Dry-run Restore**: Full support for simulated recovery drills.
 
-Example:
-```yaml
-name: simple_service
-backup:
-  - name: download_data
-    type: http_download
-    options:
-      url: "http://api.example.com/export"
-      dest_path: "/tmp/data.bin"
-  - name: upload_to_cloud
-    type: rclone_upload
-    options:
-      local_path: "/tmp/data.bin"
-      remote_name: "gdrive"
-      remote_path: "backups/simple/{{ timestamp }}.bin"
-```
+### Consistency Classification
+Services define their consistency guarantees:
+- `crash_consistent`: No guest-level freeze.
+- `application_consistent`: Guest-level hooks used to quiesce apps.
+- `eventual_consistent`: Data reconciled over time.
 
-## 📋 Failure Modes & Safety
+## 🚀 Usage
 
-- **Retries**: Steps can define a `retry` count with exponential backoff.
-- **Timeouts**: (Coming soon) Steps can have execution timeouts.
-- **Dry-run**: Always use `--dry-run` to verify your spec without side effects.
-- **Integrity**: Use the `checksum` primitive and catalog to ensure backup integrity.
-
-## 🔄 Restore Procedure
-
-To restore a service:
+### Running a Backup
 ```bash
-backup-cli restore <service_name> --version latest
+backup-cli run --spec specs/my_service.yaml
 ```
-This will lookup the latest artifact in the catalog, download it, and execute the `restore` steps defined in the service spec.
+
+### Restoring a Service
+```bash
+backup-cli restore <service_name> --spec specs/my_service.yaml --version latest --force
+```
+
+## 📊 Metrics & Observability
+Lightweight Prometheus textfile export available at `/var/lib/backup-engine/metrics/`.
+- `backup_duration_seconds`
+- `backup_status` (0/1)
+- `backup_artifact_bytes`
+- `backup_last_run_timestamp_seconds`
+
+## 🛠️ Retention Model
+- **Catalog-driven**: Deletion is triggered by the catalog, not just filesystem scans.
+- **Atomic Promotion**: Artifacts are uploaded to temporary locations and promoted only after successful transfer.
+- **Remote Cleanup**: Retention policy automatically purges old artifacts from remote storage via rclone.
 
 ## 🧪 Testing
-
-Run tests using:
 ```bash
 export PYTHONPATH=.
 pytest tests/
 ```
-Tests include unit tests for primitives, integration tests for engine logic, and E2E tests for full spec execution.
+The suite includes DAG validation, staging isolation, and integrity verification tests.

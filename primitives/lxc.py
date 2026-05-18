@@ -1,8 +1,17 @@
 import sh
 from typing import Any, Dict
-from primitives.base import Primitive
+from primitives.base import Primitive, PrimitiveContract
 
 class PctExec(Primitive):
+    contract = PrimitiveContract(
+        inputs=["vmid", "command", "user"],
+        outputs=["stdout"],
+        side_effects=["mutation_in_lxc_container"],
+        failure_modes=["container_not_running", "command_failed"],
+        retryable=False,
+        idempotent=False
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         vmid = self.options.get("vmid")
         command = self.options.get("command")

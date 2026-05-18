@@ -1,12 +1,18 @@
 import uuid
 import time
 import json
+import shutil
+import os
+import hashlib
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Type
+from typing import List, Dict, Any, Type, Optional
 import structlog
 from jinja2 import Template
-from engine.loader import ServiceSpec, StepSpec
+
+from engine.loader import ServiceSpec, StepSpec, HookSpec
+from engine.context import ExecutionContext
+from engine.dag import ExecutionDAG
 from primitives.base import Primitive
 from primitives.network import HttpGet, HttpPost, HttpDownload
 from primitives.filesystem import Tar, Copy, Compress, Checksum
@@ -32,60 +38,151 @@ PRIMITIVE_MAP: Dict[str, Type[Primitive]] = {
 }
 
 class ExecutionEngine:
-    def __init__(self, dry_run: bool = False):
+    def __init__(self, dry_run: bool = False, staging_base: Path = Path("/var/lib/backup-engine/staging")):
         self.dry_run = dry_run
-        self.context: Dict[str, Any] = {}
+        self.staging_base = staging_base
+        self.context: Optional[ExecutionContext] = None
 
-    def run_service(self, spec: ServiceSpec, operation: str = "backup", initial_context: Dict[str, Any] = {}):
-        run_id = str(uuid.uuid4())
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    def _create_run_id(self) -> str:
+        return f"{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
 
-        log = logger.bind(service=spec.name, run_id=run_id, operation=operation)
+    def run_service(self, spec: ServiceSpec, operation: str = "backup", initial_context: Dict[str, Any] = {}, skip_steps: List[str] = []):
+        run_id = self._create_run_id()
+        timestamp = datetime.now()
+        staging_dir = self.staging_base / run_id
+
+        if not self.dry_run:
+            try:
+                staging_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                staging_dir = Path("/tmp/backup-engine/staging") / run_id
+                staging_dir.mkdir(parents=True, exist_ok=True)
+
+        self.context = ExecutionContext(
+            run_id=run_id,
+            timestamp=timestamp,
+            service=spec.name,
+            staging_dir=staging_dir,
+            variables=initial_context,
+            dry_run=self.dry_run
+        )
+
+        log = logger.bind(service=spec.name, run_id=run_id, operation=operation, staging_dir=str(staging_dir))
         log.info("Starting service operation")
 
-        self.context = {
-            "service": spec.name,
-            "run_id": run_id,
-            "timestamp": timestamp,
-            "dry_run": self.dry_run,
-            **initial_context
-        }
+        try:
+            if operation == "restore":
+                self._verify_restore_safety(log, spec)
 
-        steps = getattr(spec, operation)
-        if not steps:
-            log.warning("No steps defined for operation", operation=operation)
+            # Lifecycle Hooks: pre_
+            if operation == "backup":
+                self.execute_steps(spec.hooks.pre_backup, log, "pre_backup")
+            elif operation == "restore":
+                self.execute_steps(spec.hooks.pre_restore, log, "pre_restore")
+
+            steps = getattr(spec, operation)
+            if not steps:
+                log.warning("No steps defined for operation", operation=operation)
+            else:
+                dag = ExecutionDAG(steps)
+                execution_order = dag.get_execution_order()
+                self.execute_steps(execution_order, log, operation, skip_steps=skip_steps)
+
+            # Lifecycle Hooks: post_
+            if operation == "backup":
+                self.execute_steps(spec.hooks.post_backup, log, "post_backup")
+                self.generate_artifact_metadata(spec, log)
+            elif operation == "restore":
+                self.execute_steps(spec.hooks.post_restore, log, "post_restore")
+
+            log.info("Service operation completed successfully")
+        except Exception as e:
+            log.error("Service operation failed", error=str(e))
+            self.execute_steps(spec.hooks.on_failure, log, "on_failure")
+            self.context.execution_metadata["failed"] = True
+            raise
+        finally:
+            self.cleanup_staging(log)
+
+        return self.context.to_dict()
+
+    def _verify_restore_safety(self, log: Any, spec: ServiceSpec):
+        if self.dry_run:
+            log.info("Dry run: Skipping restore safety verification")
             return
 
+        expected_checksum = self.context.variables.get("expected_checksum")
+        artifact_local_path = self.context.variables.get("artifact_local_path")
+
+        if artifact_local_path and expected_checksum:
+            log.info("Verifying artifact checksum before restore", path=artifact_local_path)
+            sha256 = hashlib.sha256()
+            with open(artifact_local_path, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    sha256.update(chunk)
+
+            actual_checksum = sha256.hexdigest()
+            if actual_checksum != expected_checksum:
+                raise ValueError(f"Checksum mismatch! Expected {expected_checksum}, got {actual_checksum}")
+            log.info("Checksum verification passed")
+
+        if not self.context.variables.get("force"):
+            log.info("Checking for potential overwrite during restore")
+            # For each restore step, check if it's destructive and if target exists
+            # This is a simplified version of overwrite protection
+            for step in (spec.restore or []):
+                if step.type == "copy":
+                    dest = step.options.get("dest")
+                    if dest:
+                        templated_dest = self._template_options(dest, self.context.to_dict())
+                        if Path(templated_dest).exists():
+                            raise RuntimeError(f"Restore safety: target path '{templated_dest}' exists. Use --force to overwrite.")
+
+    def execute_steps(self, steps: List[StepSpec], log: Any, phase: str, skip_steps: List[str] = []):
         for step in steps:
-            self.execute_step(step, log)
+            if step.name in skip_steps:
+                log.info("Skipping step (already completed)", step=step.name, phase=phase)
+                continue
+            self.execute_step(step, log.bind(phase=phase))
 
-        log.info("Service operation completed")
+    def cleanup_staging(self, log: Any):
+        if self.dry_run or not self.context:
+            return
 
-        if operation == "backup":
-            self.generate_artifact_metadata(spec, log)
+        staging_dir = self.context.staging_dir
+        if staging_dir.exists():
+            if self.context.execution_metadata.get("failed"):
+                log.warning("Preserving staging directory for debugging due to failure", path=str(staging_dir))
+                return
 
-        return self.context
+            log.info("Cleaning up staging directory", path=str(staging_dir))
+            shutil.rmtree(staging_dir)
 
     def generate_artifact_metadata(self, spec: ServiceSpec, log: Any):
+        if not self.context:
+            return
+
+        ctx_dict = self.context.to_dict()
         artifact_metadata = {
             "service": spec.name,
-            "timestamp": self.context["timestamp"],
-            "run_id": self.context["run_id"],
-            "artifact_path": self.context.get("artifact_path"),
-            "checksum": self.context.get("artifact_checksum"),
+            "timestamp": ctx_dict["timestamp"],
+            "run_id": self.context.run_id,
+            "artifact_path": self.context.variables.get("artifact_path"),
+            "checksum": self.context.variables.get("artifact_checksum"),
+            "consistency": spec.consistency,
+            "schema_version": spec.schema_version,
             "metadata": {
-                "compression": self.context.get("compression", "zstd"),
+                "compression": self.context.variables.get("compression", "zstd"),
                 "source": spec.name
             }
         }
 
-        # Save to a local file as well
-        metadata_path = Path(f"/tmp/{spec.name}_{self.context['run_id']}_metadata.json")
-        with open(metadata_path, "w") as f:
-            json.dump(artifact_metadata, f, indent=2)
+        metadata_path = self.context.staging_dir / "metadata.json"
+        if not self.dry_run:
+            with open(metadata_path, "w") as f:
+                json.dump(artifact_metadata, f, indent=2)
 
-        self.context["artifact_metadata"] = artifact_metadata
-        self.context["metadata_file"] = str(metadata_path)
+        self.context.execution_metadata["artifact_metadata"] = artifact_metadata
         log.info("Artifact metadata generated", path=str(metadata_path))
 
     def execute_step(self, step: StepSpec, log: Any):
@@ -99,9 +196,7 @@ class ExecutionEngine:
         if not primitive_class:
             raise ValueError(f"Unknown primitive type: {step.type}")
 
-        # Template the options using the current context
-        templated_options = self._template_options(step.options, self.context)
-
+        templated_options = self._template_options(step.options, self.context.to_dict())
         primitive = primitive_class(step.name, templated_options)
 
         retries = step.retry or 0
@@ -110,10 +205,10 @@ class ExecutionEngine:
         while attempt <= retries:
             try:
                 log.info("Executing step", attempt=attempt+1)
-                result = primitive.execute(self.context)
+                result = primitive.execute(self.context.to_dict())
 
                 if step.register:
-                    self.context[step.register] = result
+                    self.context.variables[step.register] = result
 
                 log.info("Step completed successfully")
                 return result
@@ -125,7 +220,7 @@ class ExecutionEngine:
                         log.warning("Ignoring step failure")
                         return None
                     raise
-                time.sleep(2 ** attempt) # Exponential backoff
+                time.sleep(2 ** attempt)
 
     def _template_options(self, options: Any, context: Dict[str, Any]) -> Any:
         if isinstance(options, str):

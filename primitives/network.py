@@ -1,8 +1,17 @@
 import requests
 from typing import Any, Dict
-from primitives.base import Primitive
+from primitives.base import Primitive, PrimitiveContract
 
 class HttpGet(Primitive):
+    contract = PrimitiveContract(
+        inputs=["url", "headers", "timeout", "extract_json"],
+        outputs=["response_data"],
+        side_effects=[],
+        failure_modes=["timeout", "network_error", "invalid_status_code"],
+        retryable=True,
+        idempotent=True
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         url = self.options.get("url")
         headers = self.options.get("headers", {})
@@ -17,6 +26,15 @@ class HttpGet(Primitive):
         return response.text
 
 class HttpPost(Primitive):
+    contract = PrimitiveContract(
+        inputs=["url", "headers", "json", "data", "timeout", "extract_json"],
+        outputs=["response_data"],
+        side_effects=["server_side_mutation"],
+        failure_modes=["timeout", "network_error", "invalid_status_code"],
+        retryable=False,
+        idempotent=False
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         url = self.options.get("url")
         headers = self.options.get("headers", {})
@@ -33,6 +51,15 @@ class HttpPost(Primitive):
         return response.text
 
 class HttpDownload(Primitive):
+    contract = PrimitiveContract(
+        inputs=["url", "headers", "dest_path", "timeout"],
+        outputs=["dest_path"],
+        side_effects=["creates_file"],
+        failure_modes=["timeout", "network_error", "disk_full"],
+        retryable=True,
+        idempotent=True
+    )
+
     def execute(self, context: Dict[str, Any]) -> Any:
         url = self.options.get("url")
         headers = self.options.get("headers", {})
