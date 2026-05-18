@@ -10,6 +10,10 @@ from src.core.locking import Lock
 # Import modules to register them
 import src.modules.qdrant
 import src.modules.n8n
+import src.modules.homeassistant
+import src.modules.mqtt
+import src.modules.zigbee2mqtt
+import src.modules.cloudflared
 
 logger = structlog.get_logger()
 
@@ -34,21 +38,16 @@ def cli(ctx, config_dir, debug):
 
 @cli.command()
 @click.option("--dry-run", is_flag=True)
+@click.option("--parallel", is_flag=True)
 @click.pass_context
-def backup(ctx, dry_run):
+def backup(ctx, dry_run, parallel):
     infra = ctx.obj["infra"]
     backup_conf = ctx.obj["config"]
     
-    lock = Lock(Path("/tmp/backup_server.lock"))
-    try:
-        lock.acquire()
+    with Lock(Path("/tmp/backup_server.lock")):
         storage = RCloneStorage(remote=infra.rclone_remote, config_path=infra.rclone_config_path)
         engine = BackupEngine(infra, backup_conf, storage)
-        engine.run_all(dry_run=dry_run)
-    except Exception as e:
-        logger.error("Backup run failed", error=str(e))
-    finally:
-        lock.release()
+        engine.run_all(dry_run=dry_run, parallel=parallel)
 
 @cli.command()
 @click.argument("module")

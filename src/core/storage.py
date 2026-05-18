@@ -25,11 +25,16 @@ class RCloneStorage(StorageProvider):
         self.rclone = sh.rclone.bake(config=str(config_path)) if config_path else sh.rclone
 
     def upload(self, local_path: Path, remote_path: str):
-        logger.info("Uploading via rclone", local=str(local_path), remote=f"{self.remote}/{remote_path}")
+        # RClone copy works on files and directories.
+        # If remote_path includes the filename, we should ensure we handle it correctly.
+        # Typically rclone copy local_file remote:path/to/dest/
+        remote_dest = f"{self.remote}/{Path(remote_path).parent}"
+        logger.info("Uploading via rclone", local=str(local_path), remote=remote_dest)
         try:
-            self.rclone.copy(str(local_path), f"{self.remote}/{remote_path}")
+            # We use 'copyto' to ensure the destination filename is exactly what we want
+            self.rclone.copyto(str(local_path), f"{self.remote}/{remote_path}")
         except sh.ErrorReturnCode as e:
-            logger.error("Rclone upload failed", error=str(e))
+            logger.error("Rclone upload failed", error=str(e), stderr=e.stderr.decode() if e.stderr else "")
             raise
 
     def delete(self, remote_path: str):

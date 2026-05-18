@@ -1,23 +1,49 @@
 global_retention_days: 30
+
 modules:
   qdrant:
     enabled: true
-    schedule: "0 3 * * *"
     retention_days: 14
     options:
-      host: "192.168.1.20"
+      host: "192.168.1.50"
       port: 6333
+      api_key: "${QDRANT_API_KEY}"
+
   n8n:
     enabled: true
-    schedule: "0 4 * * *"
     retention_days: 30
     options:
-      data_dir: "/var/lib/n8n"
-  home_assistant:
-    enabled: false
+      lxc_id: 101
+      data_dir: "/home/node/.n8n"
+
+  homeassistant:
+    enabled: true
+    retention_days: 30
+    options:
+      lxc_id: 102
+      config_dir: "/config"
+      excludes:
+        - "home-assistant_v2.db"
+        - "home-assistant_v2.db-shm"
+        - "home-assistant_v2.db-wal"
+
   mqtt:
-    enabled: false
+    enabled: true
+    retention_days: 30
+    options:
+      lxc_id: 103
+      data_dir: "/var/lib/mosquitto"
+
   zigbee2mqtt:
-    enabled: false
+    enabled: true
+    retention_days: 30
+    options:
+      lxc_id: 104
+      data_dir: "/app/data"
+
   cloudflared:
-    enabled: false
+    enabled: true
+    retention_days: 90
+    options:
+      lxc_id: 105
+      config_dir: "/etc/cloudflared"

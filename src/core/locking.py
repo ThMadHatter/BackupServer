@@ -21,10 +21,22 @@ class Lock:
 
     def release(self):
         if self.handle:
-            fcntl.flock(self.handle, fcntl.LOCK_UN)
+            try:
+                fcntl.flock(self.handle, fcntl.LOCK_UN)
+            except IOError:
+                pass
             self.handle.close()
+            self.handle = None
             logger.info("Lock released")
             try:
-                os.remove(self.lock_file)
+                if self.lock_file.exists():
+                    os.remove(self.lock_file)
             except OSError:
                 pass
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.release()

@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
 from pathlib import Path
 import structlog
+import hashlib
 
 logger = structlog.get_logger()
 
@@ -39,4 +40,16 @@ class BackupModule(ABC):
         """Optional cleanup after backup/restore."""
         if path.exists():
             self.logger.info("Cleaning up temporary path", path=str(path))
-            # Implementation for cleanup if needed
+            if path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                import shutil
+                shutil.rmtree(path)
+
+    def calculate_checksum(self, file_path: Path) -> str:
+        """Calculate SHA-256 checksum of a file."""
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
