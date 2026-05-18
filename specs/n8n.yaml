@@ -1,0 +1,21 @@
+name: n8n
+backup:
+  - name: export_workflows
+    type: pct_exec
+    options:
+      vmid: 101
+      command: "n8n export:workflow --all --output=/tmp/workflows.json"
+
+  - name: download_export
+    type: copy
+    options:
+      source: "/var/lib/lxc/101/rootfs/tmp/workflows.json"
+      dest: "/tmp/n8n_workflows_{{ timestamp }}.json"
+    register: artifact_path
+
+  - name: upload
+    type: rclone_upload
+    options:
+      local_path: "{{ artifact_path }}"
+      remote_name: "gdrive"
+      remote_path: "backups/n8n/{{ timestamp }}/workflows.json"
