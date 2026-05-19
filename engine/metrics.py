@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Dict, Any
 
@@ -11,12 +12,6 @@ class MetricsExporter:
         status = "success" if not context.get("execution_metadata", {}).get("failed") else "failure"
         artifact_size = context.get("execution_metadata", {}).get("artifact_metadata", {}).get("size", 0)
 
-        # Prometheus expects Unix timestamps for gauge values that represent time
-        # context["timestamp"] is a datetime object in the ExecutionContext,
-        # but to_dict() converted it to a string.
-        # Let's ensure we use a float unix timestamp if possible.
-        # Actually, let's just use the current time for 'last run' if we don't have the exact start time as float.
-        import time
         unix_ts = time.time()
 
         metrics = [

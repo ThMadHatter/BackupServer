@@ -22,7 +22,7 @@ The system uses a declarative engine that interprets YAML specifications and exe
 - **Ordering**: Deterministic topological sort based on dependencies and spec order.
 
 ### Staging Lifecycle
-- **Isolation**: Each run gets a unique `/var/lib/backup-engine/staging/<run_id>/`.
+- **Isolation**: Each run gets a unique subdirectory in the staging area.
 - **Cleanup**: Successful runs are automatically cleaned up.
 - **Crash Recovery**: Failed runs preserve the staging area for forensic debugging.
 
@@ -39,6 +39,13 @@ Services define their consistency guarantees:
 
 ## 🚀 Usage
 
+### Bootstrapping
+Before first run, initialize the environment:
+```bash
+python -m engine.cli init
+```
+This validates configuration and creates necessary directories.
+
 ### Running a Backup
 ```bash
 backup-cli run --spec specs/my_service.yaml
@@ -50,7 +57,7 @@ backup-cli restore <service_name> --spec specs/my_service.yaml --version latest 
 ```
 
 ## 📊 Metrics & Observability
-Lightweight Prometheus textfile export available at `/var/lib/backup-engine/metrics/`.
+Lightweight Prometheus textfile export available.
 - `backup_duration_seconds`
 - `backup_status` (0/1)
 - `backup_artifact_bytes`
@@ -66,4 +73,14 @@ Lightweight Prometheus textfile export available at `/var/lib/backup-engine/metr
 export PYTHONPATH=.
 pytest tests/
 ```
-The suite includes DAG validation, staging isolation, and integrity verification tests.
+
+## ⚠️ Migration Notes
+
+### Configuration Changes
+- `BACKUP_BASE_DIR` is now the root for all system files (catalog, staging, metrics).
+- Default `BACKUP_BASE_DIR` is `/var/lib/backup-engine`.
+- `SAFE_MODE` is enabled by default, preventing destructive retention pruning.
+
+### CLI Changes
+- Added `init` command.
+- Lazy initialization of dependencies ensures `--help` and `list` work without a full production environment.

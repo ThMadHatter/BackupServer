@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 from engine.runner import ExecutionEngine
 from engine.loader import ServiceSpec, StepSpec
+from src.core.exceptions import RestoreSafetyError
 
 def test_restore_overwrite_protection(tmp_path):
     target = tmp_path / "target_file"
@@ -17,7 +18,7 @@ def test_restore_overwrite_protection(tmp_path):
     )
 
     # Without force, it should raise
-    with pytest.raises(RuntimeError, match="Restore safety: target path .* exists"):
+    with pytest.raises(RestoreSafetyError, match="Restore safety: target path .* exists"):
         engine.run_service(spec, operation="restore")
 
 def test_restore_force_overwrite(tmp_path):

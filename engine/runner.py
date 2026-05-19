@@ -19,6 +19,7 @@ from primitives.filesystem import Tar, Copy, Compress, Checksum
 from primitives.storage import RCloneUpload, RCloneDownload
 from primitives.lxc import PctExec
 from primitives.utils import JsonQuery, TemplatePrimitive
+from src.core.exceptions import RestoreSafetyError, PrimitiveError, BackupEngineError
 
 logger = structlog.get_logger()
 
@@ -38,7 +39,7 @@ PRIMITIVE_MAP: Dict[str, Type[Primitive]] = {
 }
 
 class ExecutionEngine:
-    def __init__(self, dry_run: bool = False, staging_base: Path = Path("/var/lib/backup-engine/staging")):
+    def __init__(self, dry_run: bool = False, staging_base: Optional[Path] = None):
         self.dry_run = dry_run
         self.staging_base = staging_base
         self.context: Optional[ExecutionContext] = None
@@ -49,14 +50,17 @@ class ExecutionEngine:
     def run_service(self, spec: ServiceSpec, operation: str = "backup", initial_context: Dict[str, Any] = {}, skip_steps: List[str] = []):
         run_id = self._create_run_id()
         timestamp = datetime.now()
-        staging_dir = self.staging_base / run_id
+
+        # Use provided staging_base or fallback to /tmp
+        actual_staging_base = self.staging_base or Path("/tmp/backup-engine/staging")
+        staging_dir = actual_staging_base / run_id
 
         if not self.dry_run:
             try:
                 staging_dir.mkdir(parents=True, exist_ok=True)
-            except PermissionError:
-                staging_dir = Path("/tmp/backup-engine/staging") / run_id
-                staging_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.error("Failed to create staging directory", path=str(staging_dir), error=str(e))
+                raise
 
         self.context = ExecutionContext(
             run_id=run_id,
@@ -74,7 +78,6 @@ class ExecutionEngine:
             if operation == "restore":
                 self._verify_restore_safety(log, spec)
 
-            # Lifecycle Hooks: pre_
             if operation == "backup":
                 self.execute_steps(spec.hooks.pre_backup, log, "pre_backup")
             elif operation == "restore":
@@ -88,7 +91,6 @@ class ExecutionEngine:
                 execution_order = dag.get_execution_order()
                 self.execute_steps(execution_order, log, operation, skip_steps=skip_steps)
 
-            # Lifecycle Hooks: post_
             if operation == "backup":
                 self.execute_steps(spec.hooks.post_backup, log, "post_backup")
                 self.generate_artifact_metadata(spec, log)
@@ -99,7 +101,8 @@ class ExecutionEngine:
         except Exception as e:
             log.error("Service operation failed", error=str(e))
             self.execute_steps(spec.hooks.on_failure, log, "on_failure")
-            self.context.execution_metadata["failed"] = True
+            if self.context:
+                self.context.execution_metadata["failed"] = True
             raise
         finally:
             self.cleanup_staging(log)
@@ -117,26 +120,27 @@ class ExecutionEngine:
         if artifact_local_path and expected_checksum:
             log.info("Verifying artifact checksum before restore", path=artifact_local_path)
             sha256 = hashlib.sha256()
-            with open(artifact_local_path, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    sha256.update(chunk)
+            try:
+                with open(artifact_local_path, "rb") as f:
+                    for chunk in iter(lambda: f.read(4096), b""):
+                        sha256.update(chunk)
 
-            actual_checksum = sha256.hexdigest()
-            if actual_checksum != expected_checksum:
-                raise ValueError(f"Checksum mismatch! Expected {expected_checksum}, got {actual_checksum}")
-            log.info("Checksum verification passed")
+                actual_checksum = sha256.hexdigest()
+                if actual_checksum != expected_checksum:
+                    raise RestoreSafetyError(f"Checksum mismatch! Expected {expected_checksum}, got {actual_checksum}")
+                log.info("Checksum verification passed")
+            except FileNotFoundError:
+                raise RestoreSafetyError(f"Artifact not found at {artifact_local_path}")
 
         if not self.context.variables.get("force"):
             log.info("Checking for potential overwrite during restore")
-            # For each restore step, check if it's destructive and if target exists
-            # This is a simplified version of overwrite protection
             for step in (spec.restore or []):
                 if step.type == "copy":
                     dest = step.options.get("dest")
                     if dest:
                         templated_dest = self._template_options(dest, self.context.to_dict())
                         if Path(templated_dest).exists():
-                            raise RuntimeError(f"Restore safety: target path '{templated_dest}' exists. Use --force to overwrite.")
+                            raise RestoreSafetyError(f"Restore safety: target path '{templated_dest}' exists. Use --force to overwrite.")
 
     def execute_steps(self, steps: List[StepSpec], log: Any, phase: str, skip_steps: List[str] = []):
         for step in steps:
@@ -156,7 +160,10 @@ class ExecutionEngine:
                 return
 
             log.info("Cleaning up staging directory", path=str(staging_dir))
-            shutil.rmtree(staging_dir)
+            try:
+                shutil.rmtree(staging_dir)
+            except Exception as e:
+                log.error("Failed to cleanup staging directory", path=str(staging_dir), error=str(e))
 
     def generate_artifact_metadata(self, spec: ServiceSpec, log: Any):
         if not self.context:
@@ -194,7 +201,7 @@ class ExecutionEngine:
 
         primitive_class = PRIMITIVE_MAP.get(step.type)
         if not primitive_class:
-            raise ValueError(f"Unknown primitive type: {step.type}")
+            raise PrimitiveError(f"Unknown primitive type: {step.type}")
 
         templated_options = self._template_options(step.options, self.context.to_dict())
         primitive = primitive_class(step.name, templated_options)
@@ -219,7 +226,9 @@ class ExecutionEngine:
                     if step.ignore_errors:
                         log.warning("Ignoring step failure")
                         return None
-                    raise
+                    if isinstance(e, BackupEngineError):
+                        raise
+                    raise PrimitiveError(f"Step '{step.name}' failed after {attempt} attempts: {str(e)}")
                 time.sleep(2 ** attempt)
 
     def _template_options(self, options: Any, context: Dict[str, Any]) -> Any:

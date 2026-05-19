@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 from engine.runner import ExecutionEngine
 from engine.loader import ServiceSpec, StepSpec
+from src.core.exceptions import RestoreSafetyError
 
 def test_restore_checksum_verification(tmp_path):
     artifact = tmp_path / "backup.tar.zst"
@@ -17,7 +18,7 @@ def test_restore_checksum_verification(tmp_path):
         "expected_checksum": expected_checksum
     }
 
-    with pytest.raises(ValueError, match="Checksum mismatch"):
+    with pytest.raises(RestoreSafetyError, match="Checksum mismatch"):
         engine.run_service(spec, operation="restore", initial_context=initial_context)
 
 def test_restore_checksum_success(tmp_path):
