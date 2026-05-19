@@ -38,6 +38,7 @@ def cli(ctx, config_dir, debug):
 @click.option("--spec", required=True, type=click.Path(exists=True))
 @click.option("--dry-run", is_flag=True)
 @click.option("--force", is_flag=True, help="Force execution of destructive operations")
+@click.option("--skip", multiple=True, help="Step names to skip (partial rerun)")
 @click.pass_context
 def run(ctx, spec, dry_run, force):
     infra = ctx.obj["infra"]
@@ -56,7 +57,7 @@ def run(ctx, spec, dry_run, force):
     engine = ExecutionEngine(dry_run=dry_run, staging_base=infra.backup_base_dir / "staging")
 
     start_time = time.time()
-    context = engine.run_service(service_spec, operation="backup", initial_context=variables)
+    context = engine.run_service(service_spec, operation="backup", initial_context=variables, skip_steps=list(skip))
     duration = time.time() - start_time
 
     if not dry_run:
@@ -90,8 +91,9 @@ def run(ctx, spec, dry_run, force):
 @click.option("--version", default="latest")
 @click.option("--dry-run", is_flag=True)
 @click.option("--force", is_flag=True, help="Force execution of destructive operations")
+@click.option("--skip", multiple=True, help="Step names to skip (partial rerun)")
 @click.pass_context
-def restore(ctx, service, spec, version, dry_run, force):
+def restore(ctx, service, spec, version, dry_run, force, skip):
     catalog = ctx.obj["catalog"]
 
     if version == "latest":
@@ -127,7 +129,7 @@ def restore(ctx, service, spec, version, dry_run, force):
     }
 
     engine = ExecutionEngine(dry_run=dry_run, staging_base=infra.backup_base_dir / "staging")
-    engine.run_service(service_spec, operation="restore", initial_context=initial_context)
+    engine.run_service(service_spec, operation="restore", initial_context=initial_context, skip_steps=list(skip))
 
 @cli.command()
 @click.option("--service", help="Filter by service")
