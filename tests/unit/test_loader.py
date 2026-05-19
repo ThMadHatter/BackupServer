@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from engine.loader import load_spec
+from backup_server.loader import load_spec
 
 def test_load_spec(tmp_path):
     spec_content = """

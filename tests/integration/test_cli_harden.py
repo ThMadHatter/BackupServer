@@ -1,6 +1,6 @@
 import pytest
 from click.testing import CliRunner
-from engine.cli import cli
+from backup_server.cli import cli
 from pathlib import Path
 
 def test_cli_help_no_deps():

@@ -1,9 +1,9 @@
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
-from src.core.engine import BackupEngine
-from src.core.config import BackupConfig, InfraSettings, ModulePolicy
-from src.core.storage import StorageProvider
+from backup_server.old_engine import BackupEngine
+from backup_server.config import BackupConfig, InfraSettings, ModulePolicy
+from backup_server.storage import StorageProvider
 
 class MockStorage(StorageProvider):
     def __init__(self):
@@ -14,10 +14,14 @@ class MockStorage(StorageProvider):
         pass
 
 def test_full_backup_run(tmp_path):
+    # Ensure isolation by using tmp_path for EVERYTHING
+    backup_base = tmp_path / "local_backups"
+    backup_base.mkdir()
+
     infra = InfraSettings(
         PROXMOX_URL="http://test",
         PROXMOX_USER="test",
-        backup_base_dir=tmp_path / "local_backups"
+        BACKUP_BASE_DIR=backup_base
     )
     config = BackupConfig(
         modules={
@@ -29,14 +33,15 @@ def test_full_backup_run(tmp_path):
     (tmp_path / "n8n" / "test.txt").touch()
 
     storage = MockStorage()
-    engine = BackupEngine(infra, config, storage)
+    # Explicitly pass a new catalog for this test to avoid sharing state
+    from backup_server.catalog.manager import BackupCatalog
+    catalog = BackupCatalog(backup_base / "catalog.json")
+
+    engine = BackupEngine(infra, config, storage, catalog=catalog)
 
     with patch("sh.tar", create=True), patch("sh.zstd", create=True):
-        # We need to make sure the artifact file is "created" by the mock or the engine will fail later
-        # Actually n8n.backup returns artifact_path.
-        # Let's mock n8n.backup to actually create the file since sh.tar is mocked.
-        with patch("src.modules.n8n.N8nModule.backup") as mock_backup:
-            artifact_path = tmp_path / "local_backups/n8n/20260518_103030/n8n_backup.tar.zst"
+        with patch("backup_server.modules.n8n.N8nModule.backup") as mock_backup:
+            artifact_path = backup_base / "n8n/20260518_103030/n8n_backup.tar.zst"
             artifact_path.parent.mkdir(parents=True, exist_ok=True)
             artifact_path.touch()
             mock_backup.return_value = artifact_path

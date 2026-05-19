@@ -1,6 +1,6 @@
 import pytest
-from catalog.manager import CatalogManager
-from src.core.exceptions import CatalogError
+from backup_server.catalog.manager import CatalogManager
+from backup_server.exceptions import CatalogError
 from pathlib import Path
 
 def test_catalog_auto_create_dir(tmp_path):

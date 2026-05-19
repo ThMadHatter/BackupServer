@@ -1,8 +1,8 @@
 import pytest
 from click.testing import CliRunner
-from engine.cli import cli
+from backup_server.cli import cli
 from pathlib import Path
-from src.core.config import ValidationProfile
+from backup_server.config import ValidationProfile
 
 def test_cli_validate_config(tmp_path, monkeypatch):
     base_dir = tmp_path / "base"

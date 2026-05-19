@@ -2,9 +2,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 import datetime
-from src.core.engine import BackupEngine
-from src.core.config import BackupConfig, InfraSettings, ModulePolicy
-from src.core.catalog import BackupEntry
+from backup_server.engine import BackupEngine
+from backup_server.config import BackupConfig, InfraSettings, ModulePolicy
+from backup_server.catalog.manager import BackupEntry
 
 @pytest.fixture
 def mock_storage():
@@ -27,7 +27,7 @@ def backup_config():
     )
 
 def test_engine_run_all_dry_run(infra_settings, backup_config, mock_storage):
-    with patch("src.core.engine.registry") as mock_registry:
+    with patch("backup_server.old_engine.registry") as mock_registry:
         mock_module_cls = MagicMock()
         mock_module_instance = MagicMock()
         mock_module_cls.return_value = mock_module_instance
@@ -42,7 +42,7 @@ def test_engine_run_all_dry_run(infra_settings, backup_config, mock_storage):
         mock_storage.upload.assert_not_called()
 
 def test_engine_retention(infra_settings, backup_config, mock_storage):
-    with patch("src.core.engine.registry") as mock_registry:
+    with patch("backup_server.old_engine.registry") as mock_registry:
         engine = BackupEngine(infra_settings, backup_config, mock_storage)
 
         # Add an old entry
@@ -64,7 +64,7 @@ def test_engine_retention(infra_settings, backup_config, mock_storage):
 def test_engine_parallel_run(infra_settings, backup_config, mock_storage):
     backup_config.modules["module2"] = ModulePolicy(enabled=True)
 
-    with patch("src.core.engine.registry") as mock_registry:
+    with patch("backup_server.old_engine.registry") as mock_registry:
         mock_module_cls = MagicMock()
         mock_module_instance = MagicMock()
         mock_module_instance.backup.return_value = Path("test.tar.zst")

@@ -1,9 +1,9 @@
 import pytest
 import hashlib
 from pathlib import Path
-from engine.runner import ExecutionEngine
-from engine.loader import ServiceSpec, StepSpec
-from src.core.exceptions import RestoreSafetyError
+from backup_server.engine import ExecutionEngine
+from backup_server.loader import ServiceSpec, StepSpec
+from backup_server.exceptions import RestoreSafetyError
 
 def test_restore_checksum_verification(tmp_path):
     artifact = tmp_path / "backup.tar.zst"

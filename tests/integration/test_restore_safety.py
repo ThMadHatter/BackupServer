@@ -1,9 +1,9 @@
 import pytest
 import shutil
 from pathlib import Path
-from engine.runner import ExecutionEngine
-from engine.loader import ServiceSpec, StepSpec
-from src.core.exceptions import RestoreSafetyError
+from backup_server.engine import ExecutionEngine
+from backup_server.loader import ServiceSpec, StepSpec
+from backup_server.exceptions import RestoreSafetyError
 
 def test_restore_overwrite_protection(tmp_path):
     target = tmp_path / "target_file"

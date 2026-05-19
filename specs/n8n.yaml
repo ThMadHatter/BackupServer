@@ -11,7 +11,7 @@ backup:
     options:
       source: "/var/lib/lxc/101/rootfs/tmp/workflows.json"
       dest: "/tmp/n8n_workflows_{{ timestamp }}.json"
-    register: artifact_path
+    store_result: artifact_path
 
   - name: upload
     type: rclone_upload

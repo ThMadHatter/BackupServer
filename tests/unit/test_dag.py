@@ -1,6 +1,6 @@
 import pytest
-from engine.dag import ExecutionDAG, DAGError
-from engine.loader import StepSpec
+from backup_server.dag import ExecutionDAG, DAGError
+from backup_server.loader import StepSpec
 
 def test_dag_ordering():
     steps = [

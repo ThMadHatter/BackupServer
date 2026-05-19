@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from catalog.manager import CatalogManager
+from backup_server.catalog.manager import CatalogManager
 
 def test_catalog_manager(tmp_path):
     db_path = tmp_path / "test.sqlite"

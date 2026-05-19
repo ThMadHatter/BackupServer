@@ -1,8 +1,8 @@
 import pytest
 import shutil
 from pathlib import Path
-from engine.runner import ExecutionEngine
-from engine.loader import ServiceSpec, StepSpec
+from backup_server.engine import ExecutionEngine
+from backup_server.loader import ServiceSpec, StepSpec
 
 def test_staging_isolation(tmp_path):
     staging_base = tmp_path / "staging"
