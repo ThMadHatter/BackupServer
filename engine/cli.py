@@ -2,10 +2,11 @@ import click
 import structlog
 import time
 import sys
+import os
 from pathlib import Path
 from typing import Optional, List, Any
 from engine.logging import setup_logging
-from src.core.config import load_all_configs, InfraSettings, SecretSettings, BackupConfig
+from src.core.config import load_all_configs, InfraSettings, SecretSettings, BackupConfig, ValidationProfile
 from engine.loader import load_spec
 from engine.runner import ExecutionEngine
 from engine.metrics import MetricsExporter
@@ -81,18 +82,92 @@ def init(ctx):
 
         click.echo("Initializing backup engine...")
 
-        # Create directories
-        for path in [infra.backup_base_dir, infra.staging_dir, infra.metrics_dir]:
-            click.echo(f"Creating directory: {path}")
+        # Validate permissions
+        if infra.backup_base_dir.exists():
+            if not os.access(infra.backup_base_dir, os.W_OK):
+                raise ConfigError(f"Permission denied: {infra.backup_base_dir} is not writable")
+        else:
+            try:
+                infra.backup_base_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                raise ConfigError(f"Failed to create base directory {infra.backup_base_dir}: {str(e)}")
+
+        # Create subdirectories
+        for path in [infra.staging_dir, infra.metrics_dir]:
+            click.echo(f"Ensuring directory exists: {path}")
             path.mkdir(parents=True, exist_ok=True)
 
-        # Initialize catalog
-        click.echo(f"Initializing catalog: {infra.catalog_path}")
+        # Initialize catalog (idempotent)
+        click.echo(f"Ensuring catalog exists: {infra.catalog_path}")
         cli_ctx.catalog
 
         click.echo("Bootstrap complete. Configuration validated.")
     except Exception as e:
         click.echo(f"Initialization failed: {str(e)}", err=True)
+        sys.exit(1)
+
+@cli.command("validate-config")
+@click.pass_context
+def validate_config(ctx):
+    """Pre-run system validation (Preflight)."""
+    try:
+        cli_ctx: CLIContext = ctx.obj
+        infra = cli_ctx.infra
+        secrets = cli_ctx.secrets
+
+        click.echo("--- System Preflight Validation ---")
+        click.echo(f"Profile: {infra.profile}")
+        click.echo(f"Backup Base Dir: {infra.backup_base_dir}")
+        click.echo(f"Catalog Path: {infra.catalog_path}")
+        click.echo(f"RClone Remote: {infra.rclone_remote}")
+        click.echo(f"Safe Mode: {infra.safe_mode}")
+
+        infra.validate_for_run()
+        secrets.validate_for_run(profile=infra.profile)
+
+        if infra.backup_base_dir.exists():
+            click.echo("Base directory: OK")
+        else:
+            click.echo("Base directory: MISSING (Run 'init' to create)")
+
+        click.echo("Configuration: VALID")
+    except Exception as e:
+        click.echo(f"Validation failed: {str(e)}", err=True)
+        sys.exit(1)
+
+@cli.command("validate-run")
+@click.argument("run_id")
+@click.pass_context
+def validate_run(ctx, run_id):
+    """Validate a specific backup entry (Post-run)."""
+    try:
+        cli_ctx: CLIContext = ctx.obj
+        catalog = cli_ctx.catalog
+        backups = catalog.get_backups()
+        backup = next((b for b in backups if b["run_id"] == run_id), None)
+
+        if not backup:
+            click.echo(f"Error: Backup not found for run_id {run_id}", err=True)
+            sys.exit(1)
+
+        click.echo(f"Validating backup {run_id} for service {backup['service']}...")
+        click.echo(f"Artifact: {backup['artifact_path']}")
+        click.echo(f"Expected Checksum: {backup['checksum']}")
+        click.echo("Validation (checksum check) passed!")
+    except BackupEngineError as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+
+@cli.command("validate")
+@click.argument("run_id", required=False)
+@click.pass_context
+def validate_deprecated(ctx, run_id):
+    """Deprecated: use validate-config or validate-run."""
+    if run_id:
+        click.echo("Warning: 'validate' is deprecated. Use 'validate-run' instead.")
+        ctx.invoke(validate_run, run_id=run_id)
+    else:
+        click.echo("Error: Missing RUN_ID. If you wanted to validate your configuration, use 'validate-config'.")
         sys.exit(1)
 
 @cli.command()
@@ -108,9 +183,13 @@ def run(ctx, spec, dry_run, force, skip):
         infra = cli_ctx.infra
         secrets = cli_ctx.secrets
 
-        if not dry_run:
-            infra.validate_for_run()
-            secrets.validate_for_run()
+        # Profile-aware validation
+        profile = infra.profile
+        if dry_run:
+            profile = ValidationProfile.DRY_RUN
+
+        infra.validate_for_run()
+        secrets.validate_for_run(profile=profile)
 
         variables = {
             "infra": infra.model_dump(),
@@ -216,14 +295,19 @@ def restore(ctx, service, spec, version, dry_run, force, skip):
 
 @cli.command()
 @click.option("--service", help="Filter by service")
+@click.option("--auto-init", is_flag=True, help="Auto-initialize if catalog missing")
 @click.pass_context
-def list(ctx, service):
+def list(ctx, service, auto_init):
     """List backups in the catalog."""
     cli_ctx: CLIContext = ctx.obj
     try:
         if not cli_ctx.infra.catalog_path.exists():
-            click.echo("Catalog does not exist yet. Run 'init' or a backup first.")
-            return
+            if auto_init:
+                click.echo("Catalog missing. Auto-initializing...")
+                ctx.invoke(init)
+            else:
+                click.echo("Catalog does not exist yet. Run 'init' to bootstrap or use --auto-init.")
+                return
 
         catalog = cli_ctx.catalog
         backups = catalog.get_backups(service)
@@ -236,29 +320,6 @@ def list(ctx, service):
         click.echo("-" * 90)
         for b in backups:
             click.echo(f"{b['id']:<5} {b['service']:<15} {b['timestamp']:<20} {b['run_id']:<40} Success")
-    except BackupEngineError as e:
-        click.echo(f"Error: {str(e)}", err=True)
-        sys.exit(1)
-
-@cli.command()
-@click.argument("run_id")
-@click.pass_context
-def validate(ctx, run_id):
-    """Validate a specific backup entry."""
-    cli_ctx: CLIContext = ctx.obj
-    try:
-        catalog = cli_ctx.catalog
-        backups = catalog.get_backups()
-        backup = next((b for b in backups if b["run_id"] == run_id), None)
-
-        if not backup:
-            click.echo(f"Error: Backup not found for run_id {run_id}", err=True)
-            sys.exit(1)
-
-        click.echo(f"Validating backup {run_id} for service {backup['service']}...")
-        click.echo(f"Artifact: {backup['artifact_path']}")
-        click.echo(f"Expected Checksum: {backup['checksum']}")
-        click.echo("Validation (checksum check) passed!")
     except BackupEngineError as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)

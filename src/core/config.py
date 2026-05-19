@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -6,6 +7,11 @@ import yaml
 from pathlib import Path
 from dotenv import load_dotenv
 from src.core.exceptions import ConfigError
+
+class ValidationProfile(str, Enum):
+    PRODUCTION = "production"
+    TEST = "test"
+    DRY_RUN = "dry_run"
 
 class InfraSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -16,10 +22,11 @@ class InfraSettings(BaseSettings):
 
     proxmox_url: Optional[str] = Field(None, alias="PROXMOX_URL")
     proxmox_user: Optional[str] = Field(None, alias="PROXMOX_USER")
-    backup_base_dir: Path = Field(default=Path("/var/lib/backup-engine"))
-    rclone_config_path: Optional[Path] = Field(default=None)
-    rclone_remote: str = Field(default="local:/tmp/backups")
+    backup_base_dir: Path = Field(default=Path("/var/lib/backup-engine"), alias="BACKUP_BASE_DIR")
+    rclone_config_path: Optional[Path] = Field(default=None, alias="RCLONE_CONFIG_PATH")
+    rclone_remote: str = Field(default="local:/tmp/backups", alias="RCLONE_REMOTE")
     safe_mode: bool = Field(default=True, alias="SAFE_MODE")
+    profile: ValidationProfile = Field(default=ValidationProfile.PRODUCTION, alias="BACKUP_PROFILE")
 
     @property
     def catalog_path(self) -> Path:
@@ -34,10 +41,16 @@ class InfraSettings(BaseSettings):
         return self.backup_base_dir / "metrics"
 
     def validate_for_run(self):
-        if not self.proxmox_url:
-            raise ConfigError("PROXMOX_URL is required for execution")
-        if not self.proxmox_user:
-            raise ConfigError("PROXMOX_USER is required for execution")
+        if self.profile == ValidationProfile.PRODUCTION:
+            if not self.proxmox_url:
+                raise ConfigError("PROXMOX_URL is required for PRODUCTION execution")
+            if not self.proxmox_user:
+                raise ConfigError("PROXMOX_USER is required for PRODUCTION execution")
+        elif self.profile == ValidationProfile.TEST:
+            # In test mode we might not need Proxmox
+            pass
+        elif self.profile == ValidationProfile.DRY_RUN:
+            pass
 
 class SecretSettings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -49,9 +62,10 @@ class SecretSettings(BaseSettings):
     proxmox_password: Optional[str] = Field(None, alias="PROXMOX_PASSWORD")
     rclone_api_key: Optional[str] = Field(None, alias="RCLONE_API_KEY")
 
-    def validate_for_run(self):
-        if not self.proxmox_password:
-            raise ConfigError("PROXMOX_PASSWORD is required for execution")
+    def validate_for_run(self, profile: ValidationProfile = ValidationProfile.PRODUCTION):
+        if profile == ValidationProfile.PRODUCTION:
+            if not self.proxmox_password:
+                raise ConfigError("PROXMOX_PASSWORD is required for PRODUCTION execution")
 
 class ModulePolicy(BaseModel):
     enabled: bool = True
@@ -76,7 +90,10 @@ def load_all_configs(config_dir: Optional[Path] = None) -> tuple[InfraSettings, 
         if secrets_env.exists():
             load_dotenv(secrets_env)
 
-    # 4. OS Env overrides are handled by Pydantic naturally because load_dotenv sets them in os.environ
+        # Also check for .env in config_dir
+        dot_env = config_dir / ".env"
+        if dot_env.exists():
+            load_dotenv(dot_env)
 
     infra = InfraSettings()
     secrets = SecretSettings()

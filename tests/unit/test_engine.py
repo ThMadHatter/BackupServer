@@ -15,7 +15,7 @@ def infra_settings(tmp_path):
     return InfraSettings(
         PROXMOX_URL="http://test",
         PROXMOX_USER="test",
-        backup_base_dir=tmp_path / "backups"
+        BACKUP_BASE_DIR=tmp_path / "backups"
     )
 
 @pytest.fixture
