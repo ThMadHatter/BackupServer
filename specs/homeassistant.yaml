@@ -6,7 +6,7 @@ backup:
       url: "http://homeassistant.local:8123/api/hassio/backups/new/full"
       headers:
         Authorization: "Bearer {{ ha_token }}"
-    register: backup_resp
+    store_result: backup_resp
 
   - name: wait_for_backup
     type: template

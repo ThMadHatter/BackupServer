@@ -1,73 +1,70 @@
-# Homelab Modular Backup System (Evolution)
+# Homelab Modular Backup System (Production Grade)
 
-This is the next evolution of the backup system, transformed into a **self-describing, declarative backup orchestration platform**.
+This is a **self-describing, declarative backup orchestration platform** for Proxmox/LXC environments.
 
 ## 🏗️ Architecture
 
-The system is now driven by a declarative engine that interprets YAML specifications. This eliminates the need for custom Python code when adding new services.
+The system is built as a single Python package (`backup_server`) with a unified Directed Acyclic Graph (DAG) execution model.
 
-### Components
+### Core Components
 
-- **Engine**: The core runner that parses YAML specs, builds an execution plan, and executes primitives.
-- **Primitives**: Reusable building blocks for network, filesystem, LXC, and storage operations.
-- **Specs**: YAML files defining how each service should be backed up and restored.
-- **Catalog**: A SQLite-based system to track all backup runs, artifacts, and checksums.
+- **Engine**: DAG-based runner with explicit dependency injection.
+- **CLI**: Stabilized entrypoint (`python -m backup_server.main`) with lazy initialization.
+- **Catalog**: SQLite-based system tracking all backup runs, artifacts, and checksums with mandatory validation flags.
+- **Manifests**: Every run generates an immutable `manifest.json` capturing host info, execution steps, and artifact hashes.
+- **Staging**: Isolated directories per run (`<BACKUP_BASE_DIR>/staging/<run_id>`) with deterministic cleanup.
 
-## 🚀 Why Declarative?
+## 🛡️ Reliability & Safety
 
-1.  **No Code for New Services**: Adding a new service only requires writing a YAML spec.
-2.  **Consistency**: All services use the same set of well-tested primitives.
-3.  **Transparency**: The backup process is explicitly defined in a human-readable format.
-4.  **Flexibility**: Primitives can be composed in any order to support complex workflows.
+### Retention Safety Gates
+Retention policy is protected by multiple barriers:
+- **Protect Latest**: Never deletes the most recent successful backup.
+- **Minimum Count**: Enforces a minimum number of backups per service.
+- **Validation Required**: Optionally prevents deletion of backups that haven't passed a restore drill.
+- **Checksum Guard**: Won't delete backups with missing or mismatched checksums.
 
-## 🛠️ How to Add a New Service
+### Restore Safety
+- **Mandatory Integrity**: Checksums are verified *before* and *after* restore.
+- **Overwrite Protection**: Prevents accidental data loss unless `--force` is used.
+- **E2E Drills**: Fully automated restore drills verify byte-level equality.
 
-1.  Create a new YAML file in the `specs/` directory (e.g., `specs/my_service.yaml`).
-2.  Define the `backup` steps using available primitives:
-    - `http_get`, `http_post`, `http_download`
-    - `tar`, `copy`, `compress`, `checksum`
-    - `pct_exec`
-    - `rclone_upload`
-3.  Use `{{ variable }}` syntax for dynamic values (context variables like `timestamp` and `run_id` are automatically provided).
-4.  Optionally define `restore` and `validation` steps.
+### Concurrency
+- **Per-Service Locking**: Prevents overlapping runs for the same service.
+- **Global Locking**: Orchestration-level protection.
 
-Example:
-```yaml
-name: simple_service
-backup:
-  - name: download_data
-    type: http_download
-    options:
-      url: "http://api.example.com/export"
-      dest_path: "/tmp/data.bin"
-  - name: upload_to_cloud
-    type: rclone_upload
-    options:
-      local_path: "/tmp/data.bin"
-      remote_name: "gdrive"
-      remote_path: "backups/simple/{{ timestamp }}.bin"
-```
+## 🚀 Usage
 
-## 📋 Failure Modes & Safety
-
-- **Retries**: Steps can define a `retry` count with exponential backoff.
-- **Timeouts**: (Coming soon) Steps can have execution timeouts.
-- **Dry-run**: Always use `--dry-run` to verify your spec without side effects.
-- **Integrity**: Use the `checksum` primitive and catalog to ensure backup integrity.
-
-## 🔄 Restore Procedure
-
-To restore a service:
+### Installation
 ```bash
-backup-cli restore <service_name> --version latest
+pip install pydantic pydantic-settings structlog click python-dotenv zstandard sh pyyaml requests jinja2 jmespath
 ```
-This will lookup the latest artifact in the catalog, download it, and execute the `restore` steps defined in the service spec.
+
+### Bootstrapping
+```bash
+python -m backup_server.main init
+```
+
+### Execution
+```bash
+# Run a backup
+python -m backup_server.main run --spec specs/qdrant.yaml
+
+# System Preflight
+python -m backup_server.main validate-config
+
+# Validate a specific run
+python -m backup_server.main validate-run <run_id>
+
+# System Health
+python -m backup_server.main doctor
+```
+
+## 📊 Observability
+Prometheus textfile exporter (`<BACKUP_BASE_DIR>/metrics/`).
 
 ## 🧪 Testing
-
-Run tests using:
 ```bash
 export PYTHONPATH=.
-pytest tests/
+pytest -v
 ```
-Tests include unit tests for primitives, integration tests for engine logic, and E2E tests for full spec execution.
+Includes unit, integration, and E2E restore drills.

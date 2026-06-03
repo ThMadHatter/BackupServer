@@ -1,6 +1,6 @@
 import pytest
-from primitives.network import HttpGet
-from primitives.utils import JsonQuery, TemplatePrimitive
+from backup_server.primitives.network import HttpGet
+from backup_server.primitives.utils import JsonQuery, TemplatePrimitive
 
 def test_json_query():
     data = {

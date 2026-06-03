@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
-from engine.loader import load_spec
-from engine.runner import ExecutionEngine
+from backup_server.loader import load_spec
+from backup_server.engine import ExecutionEngine
 
 def test_e2e_dry_run():
     spec_path = Path("specs/qdrant.yaml")

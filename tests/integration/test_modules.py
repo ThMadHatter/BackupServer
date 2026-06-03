@@ -1,8 +1,8 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
-from src.modules.n8n import N8nModule
-from src.modules.qdrant import QdrantModule
+from backup_server.modules.n8n import N8nModule
+from backup_server.modules.qdrant import QdrantModule
 
 def test_n8n_backup_local(tmp_path):
     dest = tmp_path / "dest"

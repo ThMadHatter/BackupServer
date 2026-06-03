@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from src.core.locking import Lock
+from backup_server.locking import Lock
 import os
 
 def test_lock_acquire_release(tmp_path):
