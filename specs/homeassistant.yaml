@@ -1,21 +1,18 @@
 name: homeassistant
+schema_version: "1.0"
+
 backup:
   - name: create_backup
     type: http_post
     options:
       url: "http://homeassistant.local:8123/api/hassio/backups/new/full"
       headers:
-        Authorization: "Bearer {{ ha_token }}"
+        Authorization: "Bearer {{ secrets.ha_token | default('MISSING_TOKEN') }}"
     store_result: backup_resp
-
-  - name: wait_for_backup
-    type: template
-    options:
-      template: "Backup created: {{ backup_resp }}"
 
   - name: upload
     type: rclone_upload
     options:
       local_path: "/backup/latest.tar"
-      remote_name: "gdrive"
+      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
       remote_path: "backups/homeassistant/{{ timestamp }}.tar"

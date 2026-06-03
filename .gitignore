@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.env
+config/secrets.env
+*.lock
+staging/
+metrics/
+catalog.sqlite

@@ -1,10 +1,11 @@
 name: qdrant
+schema_version: "1.0"
 
 backup:
   - name: list_collections
     type: http_get
     options:
-      url: "{{ qdrant_url }}/collections"
+      url: "{{ qdrant_url | default('http://localhost:6333') }}/collections"
     store_result: collections_resp
 
   - name: extract_names
@@ -14,20 +15,11 @@ backup:
       query: "result.collections[].name"
     store_result: collection_names
 
-  # In a real implementation, we'd loop over collection_names
-  # For the spec, let's assume a single collection for simplicity or handle via a more advanced primitive
   - name: create_snapshot
     type: http_post
     options:
-      url: "{{ qdrant_url }}/collections/{{ item }}/snapshots"
+      url: "{{ qdrant_url | default('http://localhost:6333') }}/collections/default/snapshots"
     store_result: snapshot_resp
-    # Loop support would be needed here in the engine
-
-  - name: download_snapshot
-    type: http_download
-    options:
-      url: "{{ qdrant_url }}/collections/{{ item }}/snapshots/{{ snapshot_name }}"
-      dest_path: "/tmp/{{ item }}.snapshot"
 
   - name: archive
     type: tar
@@ -46,5 +38,5 @@ backup:
     type: rclone_upload
     options:
       local_path: "{{ artifact_path }}"
-      remote_name: "gdrive"
+      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
       remote_path: "backups/qdrant/{{ timestamp }}/qdrant.tar.zst"
