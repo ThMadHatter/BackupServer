@@ -10,17 +10,9 @@ backup:
         Authorization: "Bearer {{ secrets.ha_token | default('MISSING_TOKEN') }}"
     store_result: backup_resp
 
-  - name: download_backup
-    type: pct_pull
-    options:
-      vmid: 102
-      source: "/backup/latest.tar"
-      dest: "/tmp/homeassistant_{{ timestamp }}.tar"
-    store_result: artifact_path
-
   - name: upload
     type: rclone_upload
     options:
-      local_path: "{{ artifact_path }}"
+      local_path: "/backup/latest.tar"
       remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
       remote_path: "backups/homeassistant/{{ timestamp }}.tar"

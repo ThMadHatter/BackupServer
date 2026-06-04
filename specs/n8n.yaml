@@ -33,7 +33,7 @@ backup:
   - name: upload_workflows
     type: rclone_upload
     options:
-      local_path: "{{ workflows_artifact_path }}"
+      local_path: "{{ artifact_path }}"
       remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
       remote_path: "backups/n8n/{{ timestamp }}/workflows.json"
 

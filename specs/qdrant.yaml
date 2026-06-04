@@ -2,18 +2,30 @@ name: qdrant
 schema_version: "1.0"
 
 backup:
+  - name: list_collections
+    type: http_get
+    options:
+      url: "{{ qdrant_url | default('http://localhost:6333') }}/collections"
+    store_result: collections_resp
+
+  - name: extract_names
+    type: json_query
+    options:
+      data: "{{ collections_resp }}"
+      query: "result.collections[].name"
+    store_result: collection_names
+
   - name: create_snapshot
     type: http_post
     options:
       url: "{{ qdrant_url | default('http://localhost:6333') }}/collections/default/snapshots"
     store_result: snapshot_resp
 
-  - name: download_snapshot
-    type: pct_pull
+  - name: archive
+    type: tar
     options:
-      vmid: 105
-      source: "/qdrant/storage/collections/default/snapshots/latest.snapshot"
-      dest: "/tmp/qdrant_{{ timestamp }}.snapshot"
+      source_dir: "/tmp/snapshots"
+      dest_file: "/tmp/qdrant_backup.tar.zst"
     store_result: artifact_path
 
   - name: upload
@@ -21,4 +33,4 @@ backup:
     options:
       local_path: "{{ artifact_path }}"
       remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
-      remote_path: "backups/qdrant/{{ timestamp }}/qdrant.snapshot"
+      remote_path: "backups/qdrant/{{ timestamp }}/qdrant.tar.zst"
