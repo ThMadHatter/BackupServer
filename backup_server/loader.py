@@ -2,7 +2,7 @@ import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from jinja2 import Template
+from jinja2 import Template, Environment, DebugUndefined
 from enum import Enum
 
 class ConsistencyLevel(str, Enum):
@@ -40,8 +40,11 @@ def load_spec(path: Path, variables: Dict[str, Any] = {}) -> ServiceSpec:
     with open(path, "r") as f:
         content = f.read()
 
-    # Template the YAML before parsing
-    template = Template(content)
+    # Template the YAML before parsing.
+    # We use DebugUndefined so that variables not yet available (like step results)
+    # are kept as {{ var }} in the string, to be rendered later by the engine.
+    env = Environment(undefined=DebugUndefined)
+    template = env.from_string(content)
     rendered = template.render(**variables)
 
     data = yaml.safe_load(rendered)

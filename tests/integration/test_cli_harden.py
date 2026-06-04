@@ -30,7 +30,9 @@ def test_cli_run_fails_missing_proxmox_url(tmp_path, monkeypatch):
     spec_file.write_text("name: test\nbackup: []")
 
     runner = CliRunner()
-    result = runner.invoke(cli, ["run", "--spec", str(spec_file)])
+    with monkeypatch.context() as m:
+        m.setenv("BACKUP_PROFILE", "production")
+        result = runner.invoke(cli, ["run", "--spec", str(spec_file)])
     assert result.exit_code == 1
     assert "PROXMOX_URL is required" in result.output
 
