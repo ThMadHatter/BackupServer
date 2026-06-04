@@ -51,75 +51,90 @@ modules:
     retention_days: 14
 ```
 
-## 🚀 Usage Guide
+## 🚀 CLI Command Reference
 
-### Installation
-```bash
-pip install pydantic pydantic-settings structlog click python-dotenv zstandard sh pyyaml requests jinja2
-```
+### `init`
+Bootstraps the environment by creating the necessary directory structure and the SQLite catalog.
+- **Usage**: `python3 -m backup_server.main init`
 
-### 1. Bootstrapping
-- **`init`**: Bootstraps the environment.
-  ```bash
-  python3 -m backup_server.main init
-  ```
-  Creates `staging/`, `metrics/`, and the `catalog.sqlite` database in your `BACKUP_BASE_DIR`.
+### `run`
+Executes a backup operation for a service.
+- **Usage**: `python3 -m backup_server.main run --spec <path_to_yaml> [OPTIONS]`
+- **Options**:
+    - `--spec`: (Required) Path to the service specification YAML.
+    - `--dry-run`: Simulate execution. Skips destructive primitives (`pct_exec`, `rclone_upload`, etc.) and doesn't update the catalog.
+    - `--force`: Force execution even if safety checks fail.
+    - `--skip <step_name>`: Skip one or more steps in the backup DAG.
 
-### 2. Pre-flight & Maintenance
-- **`validate-config`**: Validates all configuration files and environment variables.
-  ```bash
-  python3 -m backup_server.main validate-config
-  ```
+### `restore`
+Restores a service from a previous backup.
+- **Usage**: `python3 -m backup_server.main restore <service_name> --spec <path_to_yaml> [OPTIONS]`
+- **Options**:
+    - `--version <run_id>`: Specify the run ID to restore (defaults to `latest`).
+    - `--force`: Required if the restore target path already exists on disk.
+    - `--dry-run`: Simulate the restore process.
 
-- **`doctor`**: Detailed health check of the local system.
-  ```bash
-  python3 -m backup_server.main doctor
-  ```
-  Checks directory permissions, SQLite integrity, and RClone reachability.
+### `list`
+Lists backup history from the catalog.
+- **Usage**: `python3 -m backup_server.main list [OPTIONS]`
+- **Options**:
+    - `--service`: Filter the list by a specific service name.
+    - `--auto-init`: Automatically run `init` if the catalog is missing.
 
-- **`audit`**: Detects inconsistencies between the catalog and remote storage.
-  ```bash
-  python3 -m backup_server.main audit
-  ```
+### `generate-spec`
+Generates a boilerplate YAML specification.
+- **Usage**: `python3 -m backup_server.main generate-spec --type <lxc|generic|http>`
+- **Types**:
+    - `lxc`: Standard Proxmox container pattern using `pct_exec` and `pct_pull`.
+    - `generic`: Simple filesystem-based backup.
+    - `http`: API-triggered backup pattern.
 
-### 3. Service Specifications
-- **`generate-spec`**: Creates a boilerplate YAML for new services.
-  ```bash
-  python3 -m backup_server.main generate-spec --type lxc > specs/my_app.yaml
-  ```
-  Available types: `lxc`, `generic`, `http`.
+### `validate-config`
+Validates all configuration files and environment variables.
+- **Usage**: `python3 -m backup_server.main validate-config`
 
-### 4. Backup & Restore Operations
-- **`run`**: Executes the backup DAG.
-  ```bash
-  python3 -m backup_server.main run --spec specs/n8n.yaml
-  ```
-  **Options:**
-  - `--dry-run`: Log actions without executing side effects (uploads, container execs).
-  - `--force`: Ignore safety locks and execute destructive steps.
-  - `--skip <step_name>`: Skip a specific DAG node.
+### `doctor`
+Detailed health check of the local system (permissions, DB integrity, storage reachability).
+- **Usage**: `python3 -m backup_server.main doctor`
 
-- **`restore`**: Executes the restore DAG.
-  ```bash
-  python3 -m backup_server.main restore n8n --spec specs/n8n.yaml
-  ```
-  **Options:**
-  - `--version <run_id>`: Restore a specific version (default: `latest`).
-  - `--force`: Required if target files already exist (overwrite protection).
+### `audit`
+Detects inconsistencies between the catalog database and actual remote storage artifacts.
+- **Usage**: `python3 -m backup_server.main audit`
 
-### 5. Monitoring & Catalog
-- **`list`**: Shows history of backup runs.
-  ```bash
-  python3 -m backup_server.main list --service n8n
-  ```
+## 🛠️ Primitives Library
 
-- **`validate-run`**: Verifies the checksum of a completed backup.
-  ```bash
-  python3 -m backup_server.main validate-run <run_id>
-  ```
+Primitives are the atomic building blocks used in your YAML specs.
 
-## 📊 Observability
-Metrics are exported to `<BACKUP_BASE_DIR>/metrics/` in Prometheus textfile format.
+### LXC (Proxmox)
+- **`pct_exec`**: Run a command inside a container.
+    - `vmid`: Container ID.
+    - `command`: String or list of command arguments.
+- **`pct_pull`**: Copy a file from a container to the host.
+    - `vmid`, `source` (in-container), `dest` (host).
+- **`pct_push`**: Copy a file from the host to a container.
+    - `vmid`, `source` (host), `dest` (in-container).
+
+### Storage & Filesystem
+- **`rclone_upload`**: Upload a file/dir to remote storage.
+    - `local_path`, `remote_name`, `remote_path`.
+- **`tar`**: Create a compressed archive.
+    - `source_dir`, `dest_file`.
+- **`copy`**: Copy files locally.
+    - `source`, `dest`.
+- **`checksum`**: Calculate SHA256 of a file.
+    - `file_path`.
+
+### Network & Utilities
+- **`http_get` / `http_post`**: Perform API requests.
+- **`http_download`**: Download a file via URL.
+- **`json_query`**: Extract data from a JSON response using JMESPath.
+- **`template`**: Render a Jinja2 template (useful for logging or complex paths).
+
+## 💡 Best Practices
+
+1. **Avoid Direct Rootfs Access**: Instead of reading `/var/lib/lxc/.../rootfs`, use `pct_pull` to copy artifacts out of the container. This is safer and Proxmox-native.
+2. **Use Staging Paths**: Leverage the `{{ staging_dir }}` variable for temporary files to ensure they are cleaned up automatically after the run.
+3. **Atomic Uploads**: The `rclone_upload` primitive supports atomic promotion (uploading to `.tmp` first) by default.
 
 ## 🧪 Testing
 ```bash
