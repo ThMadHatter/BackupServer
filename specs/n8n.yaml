@@ -1,6 +1,4 @@
 name: n8n
-schema_version: "1.0"
-
 backup:
   - name: export_workflows
     type: pct_exec
@@ -19,5 +17,5 @@ backup:
     type: rclone_upload
     options:
       local_path: "{{ artifact_path }}"
-      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
+      remote_name: "gdrive"
       remote_path: "backups/n8n/{{ timestamp }}/workflows.json"

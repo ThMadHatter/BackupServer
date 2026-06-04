@@ -209,9 +209,6 @@ def run(ctx, spec, dry_run, force, skip):
         spec_path = Path(spec)
         service_spec = load_spec(spec_path, variables=variables)
 
-        if not infra.backup_base_dir.exists():
-            infra.backup_base_dir.mkdir(parents=True, exist_ok=True)
-
         lock_path = infra.backup_base_dir / f"{service_spec.name}.lock"
         with Lock(lock_path):
             engine = ExecutionEngine(
@@ -306,9 +303,6 @@ def restore(ctx, service, spec, version, dry_run, force, skip):
         spec_path = Path(spec)
         service_spec = load_spec(spec_path, variables=variables)
 
-        if not infra.backup_base_dir.exists():
-            infra.backup_base_dir.mkdir(parents=True, exist_ok=True)
-
         initial_context = {
             "artifact_remote_path": backup["artifact_path"],
             "expected_checksum": backup["checksum"],
@@ -330,11 +324,11 @@ def restore(ctx, service, spec, version, dry_run, force, skip):
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)
 
-@cli.command("list")
+@cli.command()
 @click.option("--service", help="Filter by service")
 @click.option("--auto-init", is_flag=True, help="Auto-initialize if catalog missing")
 @click.pass_context
-def list_backups(ctx, service, auto_init):
+def list(ctx, service, auto_init):
     """List backups in the catalog."""
     cli_ctx: CLIContext = ctx.obj
     try:
@@ -361,86 +355,6 @@ def list_backups(ctx, service, auto_init):
     except BackupEngineError as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)
-
-@cli.command("generate-spec")
-@click.option("--type", "spec_type", default="lxc", type=click.Choice(["lxc", "generic", "http"]))
-@click.pass_context
-def generate_spec(ctx, spec_type):
-    """Generate a boilerplate YAML spec."""
-    templates = {
-        "lxc": """name: my-lxc-service
-schema_version: "1.0"
-backup:
-  - name: stop_container
-    type: pct_exec
-    options:
-      vmid: 100
-      command: "systemctl stop my-app"
-
-  - name: archive_data
-    type: tar
-    options:
-      source_dir: "/var/lib/lxc/100/rootfs/var/lib/my-app"
-      dest_file: "/tmp/my-app-backup.tar.zst"
-    store_result: artifact_path
-
-  - name: upload
-    type: rclone_upload
-    options:
-      local_path: "{{ artifact_path }}"
-      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
-      remote_path: "backups/my-app/{{ timestamp }}.tar.zst"
-
-  - name: start_container
-    type: pct_exec
-    options:
-      vmid: 100
-      command: "systemctl start my-app"
-""",
-        "generic": """name: my-generic-service
-schema_version: "1.0"
-backup:
-  - name: backup_files
-    type: tar
-    options:
-      source_dir: "/path/to/data"
-      dest_file: "/tmp/backup.tar.zst"
-    store_result: artifact_path
-
-  - name: upload
-    type: rclone_upload
-    options:
-      local_path: "{{ artifact_path }}"
-      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
-      remote_path: "backups/generic/{{ timestamp }}.tar.zst"
-""",
-        "http": """name: my-http-service
-schema_version: "1.0"
-backup:
-  - name: trigger_backup
-    type: http_post
-    options:
-      url: "https://api.example.com/v1/backup"
-      headers:
-        Authorization: "Bearer {{ secrets.api_token | default('CHANGE_ME') }}"
-    store_result: trigger_resp
-
-  - name: download_artifact
-    type: http_download
-    options:
-      url: "{{ trigger_resp.download_url }}"
-      dest_path: "/tmp/backup.zip"
-    store_result: artifact_path
-
-  - name: upload
-    type: rclone_upload
-    options:
-      local_path: "{{ artifact_path }}"
-      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
-      remote_path: "backups/http/{{ timestamp }}.zip"
-"""
-    }
-    click.echo(templates.get(spec_type, templates["lxc"]))
 
 @cli.command()
 @click.pass_context

@@ -1,11 +1,9 @@
 name: restore_example
-schema_version: "1.0"
-
 restore:
   - name: download_artifact
     type: rclone_download
     options:
-      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
+      remote_name: "gdrive"
       remote_path: "{{ artifact_remote_path }}"
       local_path: "/tmp/restore.tar.zst"
     store_result: local_artifact
