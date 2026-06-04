@@ -14,57 +14,115 @@ The system is built as a single Python package (`backup_server`) with a unified 
 - **Manifests**: Every run generates an immutable `manifest.json` capturing host info, execution steps, and artifact hashes.
 - **Staging**: Isolated directories per run (`<BACKUP_BASE_DIR>/staging/<run_id>`) with deterministic cleanup.
 
-## 🛡️ Reliability & Safety
+## ⚙️ Configuration
 
-### Retention Safety Gates
-Retention policy is protected by multiple barriers:
-- **Protect Latest**: Never deletes the most recent successful backup.
-- **Minimum Count**: Enforces a minimum number of backups per service.
-- **Validation Required**: Optionally prevents deletion of backups that haven't passed a restore drill.
-- **Checksum Guard**: Won't delete backups with missing or mismatched checksums.
+The system uses a hierarchical configuration loading mechanism.
 
-### Restore Safety
-- **Mandatory Integrity**: Checksums are verified *before* and *after* restore.
-- **Overwrite Protection**: Prevents accidental data loss unless `--force` is used.
-- **E2E Drills**: Fully automated restore drills verify byte-level equality.
+### 1. `config/infra.env`
+Non-sensitive infrastructure settings.
+```env
+PROXMOX_URL=https://192.168.1.10:8006/api2/json
+PROXMOX_USER=root@pam
+BACKUP_BASE_DIR=/mnt/pve/backups/homelab
+RCLONE_REMOTE=gdrive:homelab-backups
+SAFE_MODE=True
+BACKUP_PROFILE=production
+```
 
-### Concurrency
-- **Per-Service Locking**: Prevents overlapping runs for the same service.
-- **Global Locking**: Orchestration-level protection.
+### 2. `config/secrets.env`
+Sensitive credentials.
+```env
+PROXMOX_PASSWORD=your_password
+RCLONE_API_KEY=your_key
+HA_TOKEN=your_homeassistant_token
+```
 
-## 🚀 Usage
+### 3. `config/backup.yaml`
+Global policies and module-specific configurations.
+```yaml
+global_retention_days: 30
+retention:
+  minimum_backups: 3
+  protect_latest: true
+  require_restore_validation: false
+modules:
+  n8n:
+    enabled: true
+    retention_days: 14
+```
+
+## 🚀 Usage Guide
 
 ### Installation
 ```bash
-pip install pydantic pydantic-settings structlog click python-dotenv zstandard sh pyyaml requests jinja2 jmespath
+pip install pydantic pydantic-settings structlog click python-dotenv zstandard sh pyyaml requests jinja2
 ```
 
-### Bootstrapping
-```bash
-python -m backup_server.main init
-```
+### 1. Bootstrapping
+- **`init`**: Bootstraps the environment.
+  ```bash
+  python3 -m backup_server.main init
+  ```
+  Creates `staging/`, `metrics/`, and the `catalog.sqlite` database in your `BACKUP_BASE_DIR`.
 
-### Execution
-```bash
-# Run a backup
-python -m backup_server.main run --spec specs/qdrant.yaml
+### 2. Pre-flight & Maintenance
+- **`validate-config`**: Validates all configuration files and environment variables.
+  ```bash
+  python3 -m backup_server.main validate-config
+  ```
 
-# System Preflight
-python -m backup_server.main validate-config
+- **`doctor`**: Detailed health check of the local system.
+  ```bash
+  python3 -m backup_server.main doctor
+  ```
+  Checks directory permissions, SQLite integrity, and RClone reachability.
 
-# Validate a specific run
-python -m backup_server.main validate-run <run_id>
+- **`audit`**: Detects inconsistencies between the catalog and remote storage.
+  ```bash
+  python3 -m backup_server.main audit
+  ```
 
-# System Health
-python -m backup_server.main doctor
-```
+### 3. Service Specifications
+- **`generate-spec`**: Creates a boilerplate YAML for new services.
+  ```bash
+  python3 -m backup_server.main generate-spec --type lxc > specs/my_app.yaml
+  ```
+  Available types: `lxc`, `generic`, `http`.
+
+### 4. Backup & Restore Operations
+- **`run`**: Executes the backup DAG.
+  ```bash
+  python3 -m backup_server.main run --spec specs/n8n.yaml
+  ```
+  **Options:**
+  - `--dry-run`: Log actions without executing side effects (uploads, container execs).
+  - `--force`: Ignore safety locks and execute destructive steps.
+  - `--skip <step_name>`: Skip a specific DAG node.
+
+- **`restore`**: Executes the restore DAG.
+  ```bash
+  python3 -m backup_server.main restore n8n --spec specs/n8n.yaml
+  ```
+  **Options:**
+  - `--version <run_id>`: Restore a specific version (default: `latest`).
+  - `--force`: Required if target files already exist (overwrite protection).
+
+### 5. Monitoring & Catalog
+- **`list`**: Shows history of backup runs.
+  ```bash
+  python3 -m backup_server.main list --service n8n
+  ```
+
+- **`validate-run`**: Verifies the checksum of a completed backup.
+  ```bash
+  python3 -m backup_server.main validate-run <run_id>
+  ```
 
 ## 📊 Observability
-Prometheus textfile exporter (`<BACKUP_BASE_DIR>/metrics/`).
+Metrics are exported to `<BACKUP_BASE_DIR>/metrics/` in Prometheus textfile format.
 
 ## 🧪 Testing
 ```bash
 export PYTHONPATH=.
 pytest -v
 ```
-Includes unit, integration, and E2E restore drills.
