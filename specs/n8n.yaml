@@ -5,19 +5,41 @@ backup:
   - name: export_workflows
     type: pct_exec
     options:
-      vmid: 101
+      vmid: 103
       command: "n8n export:workflow --all --output=/tmp/workflows.json"
 
-  - name: download_export
-    type: copy
+  - name: export_credentials
+    type: pct_exec
     options:
-      source: "/var/lib/lxc/101/rootfs/tmp/workflows.json"
-      dest: "/tmp/n8n_workflows_{{ timestamp }}.json"
-    store_result: artifact_path
+      vmid: 103
+      command: "n8n export:credentials --all --output=/tmp/credentials.json"
 
-  - name: upload
+  - name: download_workflows
+    type: pct_pull
+    options:
+      vmid: 103
+      source: "/tmp/workflows.json"
+      dest: "/tmp/n8n_workflows_{{ timestamp }}.json"
+    store_result: workflows_artifact_path
+
+  - name: download_credentials
+    type: pct_pull
+    options:
+      vmid: 103
+      source: "/tmp/credentials.json"
+      dest: "/tmp/n8n_credentials_{{ timestamp }}.json"
+    store_result: credentials_artifact_path
+
+  - name: upload_workflows
     type: rclone_upload
     options:
-      local_path: "{{ artifact_path }}"
+      local_path: "{{ workflows_artifact_path }}"
       remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
       remote_path: "backups/n8n/{{ timestamp }}/workflows.json"
+
+  - name: upload_credentials
+    type: rclone_upload
+    options:
+      local_path: "{{ credentials_artifact_path }}"
+      remote_name: "{{ infra.rclone_remote.split(':')[0] }}"
+      remote_path: "backups/n8n/{{ timestamp }}/credentials.json"
