@@ -19,7 +19,7 @@ from backup_server.primitives.base import Primitive
 from backup_server.primitives.network import HttpGet, HttpPost, HttpDownload
 from backup_server.primitives.filesystem import Tar, Copy, Compress, Checksum
 from backup_server.primitives.storage import RCloneUpload, RCloneDownload
-from backup_server.primitives.lxc import PctExec
+from backup_server.primitives.lxc import PctExec, PctPull, PctPush
 from backup_server.primitives.utils import JsonQuery, TemplatePrimitive
 from backup_server.exceptions import RestoreSafetyError, PrimitiveError, BackupEngineError
 
@@ -36,6 +36,8 @@ PRIMITIVE_MAP: Dict[str, Type[Primitive]] = {
     "rclone_upload": RCloneUpload,
     "rclone_download": RCloneDownload,
     "pct_exec": PctExec,
+    "pct_pull": PctPull,
+    "pct_push": PctPush,
     "json_query": JsonQuery,
     "template": TemplatePrimitive,
 }
@@ -236,7 +238,7 @@ class ExecutionEngine:
             self.execution_log.append(step_entry)
             return
 
-        if self.infra and self.infra.safe_mode and step.type in ["rclone_upload", "http_post", "pct_exec"]:
+        if self.infra and self.infra.safe_mode and step.type in ["rclone_upload", "http_post", "pct_exec", "pct_pull", "pct_push"]:
              log.info("Safe mode: Skipping potentially destructive or external step", step=step.name, type=step.type)
              step_entry["status"] = "safe_mode_skipped"
              self.execution_log.append(step_entry)

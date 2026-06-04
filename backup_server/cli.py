@@ -378,10 +378,17 @@ backup:
       command: "systemctl stop my-app"
 
   - name: archive_data
-    type: tar
+    type: pct_exec
     options:
-      source_dir: "/var/lib/lxc/100/rootfs/var/lib/my-app"
-      dest_file: "/tmp/my-app-backup.tar.zst"
+      vmid: 100
+      command: "tar -I zstd -cf /tmp/backup.tar.zst -C /var/lib/my-app ."
+
+  - name: download_artifact
+    type: pct_pull
+    options:
+      vmid: 100
+      source: "/tmp/backup.tar.zst"
+      dest: "/tmp/my-app-backup.tar.zst"
     store_result: artifact_path
 
   - name: upload

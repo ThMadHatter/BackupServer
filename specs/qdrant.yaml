@@ -28,12 +28,6 @@ backup:
       dest_file: "/tmp/qdrant_backup.tar.zst"
     store_result: artifact_path
 
-  - name: calculate_checksum
-    type: checksum
-    options:
-      file_path: "{{ artifact_path }}"
-    store_result: artifact_checksum
-
   - name: upload
     type: rclone_upload
     options:
